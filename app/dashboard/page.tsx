@@ -5,7 +5,9 @@ import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { CategoryIcon, Icon } from "@/components/icon";
 import { MonthSwitcher } from "@/components/month-switcher";
+import { Toast, useFlash } from "@/components/toast";
 import { TransactionForm } from "@/components/transaction-form";
+import { apiFetch, errorMessage } from "@/lib/api-client";
 import { getCategoryColor } from "@/lib/category-colors";
 import { dateLabel, formatMoney, todayInShanghai } from "@/lib/domain";
 import { CategoryDTO, DashboardDTO } from "@/lib/types";
@@ -45,12 +47,12 @@ function SpendingChart({ days }: { days: DashboardDTO["recentExpenses"] }) {
   </div>;
 }
 
-function Toast({ message }: { message: string }) {
-  return <div className="undo-toast" role="status" aria-live="polite">{message}</div>;
-}
-
 export default function DashboardPage() {
-  const [month, setMonth] = useState(todayInShanghai().slice(0, 7));
+  const [month, setMonthRaw] = useState(todayInShanghai().slice(0, 7));
+  const [reloadToken, setReloadToken] = useState(0);
+  // A reload token lets any handler refetch without month changing.
+  const setMonth = (next: string) => { setMonthRaw(next); };
+  const reload = () => setReloadToken((token) => token + 1);
   const [data, setData] = useState<DashboardDTO | null>(null);
   const [categories, setCategories] = useState<CategoryDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -59,57 +61,48 @@ export default function DashboardPage() {
   const [budgetInput, setBudgetInput] = useState("");
   const [budgetEditing, setBudgetEditing] = useState(false);
   const [budgetSaving, setBudgetSaving] = useState(false);
-  const [message, setMessage] = useState("");
+  const { message, flash } = useFlash();
 
-  async function load() {
-    setLoading(true);
-    setError("");
-    try {
-      const [dashboardResponse, categoryResponse] = await Promise.all([
-        fetch(`/api/dashboard?month=${month}`),
-        fetch("/api/categories"),
-      ]);
-      const dashboardJson = await dashboardResponse.json().catch(() => ({}));
-      const categoryJson = await categoryResponse.json().catch(() => ({}));
-      if (!dashboardResponse.ok) throw new Error(dashboardJson.error || "暂时无法打开仪表盘");
-      if (!categoryResponse.ok) throw new Error(categoryJson.error || "暂时无法读取分类");
-      setData(dashboardJson as DashboardDTO);
-      setCategories(categoryJson.categories || []);
-      setBudgetInput(dashboardJson.budget ? (dashboardJson.budget.amountCents / 100).toFixed(2) : "");
-      setBudgetEditing(false);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "暂时无法打开仪表盘");
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    // AbortController prevents stale responses from overwriting fresh ones
+    // when the user switches months quickly.
+    const controller = new AbortController();
+    async function load() {
+      setLoading(true);
+      setError("");
+      try {
+        const [dashboard, categoryResult] = await Promise.all([
+          apiFetch<DashboardDTO>(`/api/dashboard?month=${month}`, { signal: controller.signal }),
+          apiFetch<{ categories: CategoryDTO[] }>("/api/categories", { signal: controller.signal }),
+        ]);
+        setData(dashboard);
+        setCategories(categoryResult.categories || []);
+        setBudgetInput(dashboard.budget ? (dashboard.budget.amountCents / 100).toFixed(2) : "");
+        setBudgetEditing(false);
+      } catch (loadError) {
+        if (loadError instanceof DOMException && loadError.name === "AbortError") return;
+        setError(errorMessage(loadError, "暂时无法打开仪表盘"));
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
     }
-  }
-
-  useEffect(() => { void load(); }, [month]);
-
-  function showMessage(text: string) {
-    setMessage(text);
-    window.setTimeout(() => setMessage(""), 2600);
-  }
+    void load();
+    return () => controller.abort();
+  }, [month, reloadToken]);
 
   async function saveBudget() {
     if (!budgetInput.trim()) {
-      showMessage("先输入一个预算金额");
+      flash("先输入一个预算金额");
       return;
     }
     setBudgetSaving(true);
     try {
-      const response = await fetch(`/api/budgets/${month}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: budgetInput }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "预算保存失败");
-      showMessage("预算已更新");
+      await apiFetch(`/api/budgets/${month}`, { method: "PUT", json: { amount: budgetInput } });
+      flash("预算已更新");
       setBudgetEditing(false);
-      await load();
+      reload();
     } catch (saveError) {
-      showMessage(saveError instanceof Error ? saveError.message : "预算保存失败");
+      flash(errorMessage(saveError, "预算保存失败"));
     } finally {
       setBudgetSaving(false);
     }
@@ -133,7 +126,7 @@ export default function DashboardPage() {
       <MonthSwitcher month={month} onChange={setMonth} />
     </div>
 
-    {loading ? <div className="loading">正在打开你的账本…</div> : error ? <div className="inline-error"><strong>{error}</strong><button className="button button-secondary button-small" onClick={() => void load()}>再试一次</button></div> : !data ? null : <>
+    {loading ? <div className="loading">正在打开你的账本…</div> : error ? <div className="inline-error"><strong>{error}</strong><button className="button button-secondary button-small" onClick={reload}>再试一次</button></div> : !data ? null : <>
       <section className="dashboard-top" aria-label="本月概览">
         <div className="balance-card">
           <div>
@@ -166,7 +159,7 @@ export default function DashboardPage() {
 
       <section className="card recent-card"><div className="section-heading"><div><h2>最近记下的</h2><p>把小额支出记下来，月末回看就不会模糊。</p></div><button type="button" className="button button-secondary button-small" onClick={() => setShowForm(true)}><Icon name="plus" size={14} />添加记录</button></div><div className="transaction-list">{data.recentTransactions.length === 0 ? <div className="empty-state"><strong>还没有账目</strong>从一杯早餐咖啡开始记录吧。<button type="button" className="button button-primary button-small" onClick={() => setShowForm(true)}>开始记录</button></div> : data.recentTransactions.map((transaction) => { const palette = getCategoryColor(transaction.category.id); return <div className="transaction-item" key={transaction.id}><span className={`transaction-symbol${transaction.type === "INCOME" ? " income-symbol" : " expense-symbol"}`} style={transaction.type === "INCOME" ? undefined : { color: palette.color, backgroundColor: palette.surface }}><CategoryIcon categoryName={transaction.category.name} type={transaction.type} size={16} /></span><div className="transaction-main"><strong>{transaction.note || transaction.category.name}{transaction.source === "SUBSCRIPTION" && <span className="source-badge">订阅</span>}</strong><span>{transaction.category.name} · {transaction.occurredOn}</span></div><span className={`transaction-amount ${transaction.type === "INCOME" ? "income" : "expense"}`}>{transaction.type === "INCOME" ? "+" : "−"}{formatMoney(transaction.amountCents)}</span></div>; })}</div></section>
     </>}
-    {showForm && data && <TransactionForm categories={categories} defaultDate={data.focusDate} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); void load(); }} />}
+    {showForm && data && <TransactionForm categories={categories} defaultDate={data.focusDate} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); reload(); }} />}
     {message && <Toast message={message} />}
   </AppShell>;
 }
