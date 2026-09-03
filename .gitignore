@@ -14,6 +14,9 @@ tsconfig.tsbuildinfo
 *.tsbuildinfo
 next-env.d.ts
 
+# Docker image artifacts (100MB+ tarballs, rebuilt on demand)
+Docker/*.tar.gz
+
 # Local agent tool configs
 .claude/
 .freebuff/
