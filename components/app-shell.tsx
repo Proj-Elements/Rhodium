@@ -25,6 +25,21 @@ const titles: Record<string, { eyebrow: string; title: string; description: stri
   "/settings": { eyebrow: "SETTINGS", title: "把账本调成你的样子。", description: "管理分类、导入旧账，或把数据完整地带走。" },
 };
 
+/** Mirrors the CSS breakpoint: below this width the mobile chrome is used. */
+const MOBILE_QUERY = "(max-width: 900px)";
+
+function useIsMobileViewport() {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia(MOBILE_QUERY);
+    const update = () => setIsMobile(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return isMobile;
+}
+
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   return <Link href={item.href} className={`nav-item${active ? " active" : ""}`}>
     <span className="nav-icon"><Icon name={item.icon} size={17} /></span>
@@ -37,6 +52,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const page = titles[pathname] || titles["/dashboard"];
   const [syncState, setSyncState] = useState<"syncing" | "ready" | "error">("syncing");
+  const isMobile = useIsMobileViewport();
 
   useEffect(() => {
     let mounted = true;
@@ -47,7 +63,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   const syncLabel = syncState === "syncing" ? "正在同步固定支出" : syncState === "error" ? "同步稍后重试" : "固定支出已同步";
-  const allMobileItems = [...navItems, ...secondaryItems];
 
   return <div className="app-frame">
     <aside className="sidebar">
@@ -72,10 +87,20 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="sidebar-footer">CNY · ASIA/SHANGHAI</div>
     </aside>
     <main className="main-content">
-      <div className="mobile-topbar">
-        <Link href="/dashboard" className="mobile-brand"><span className="brand-mark"><span>月</span></span><strong>月余</strong></Link>
-        <Link href="/transactions?new=1" className="button button-primary button-small"><Icon name="plus" size={15} />记一笔</Link>
-      </div>
+      {/* Mobile chrome is only mounted on narrow viewports; previously it was
+          always in the DOM and merely hidden by CSS, so any stylesheet glitch
+          leaked the nav bar onto wide screens (top-right of the window). */}
+      {isMobile && (
+        <>
+          <div className="mobile-topbar">
+            <Link href="/dashboard" className="mobile-brand"><span className="brand-mark"><span>月</span></span><strong>月余</strong></Link>
+            <Link href="/transactions?new=1" className="button button-primary button-small"><Icon name="plus" size={15} />记一笔</Link>
+          </div>
+          <nav className="mobile-nav" aria-label="移动端导航">
+            {[...navItems, ...secondaryItems].map((item) => <Link href={item.href} key={item.href} className={pathname === item.href ? "active" : ""}><Icon name={item.icon} size={18} /><span>{item.label}</span></Link>)}
+          </nav>
+        </>
+      )}
       <header className="page-header">
         <div className="page-header-copy">
           <p className="eyebrow">{page.eyebrow}</p>
@@ -86,8 +111,5 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
       <div className="page-content">{children}</div>
     </main>
-    <nav className="mobile-nav" aria-label="移动端导航">
-      {allMobileItems.map((item) => <Link href={item.href} key={item.href} className={pathname === item.href ? "active" : ""}><Icon name={item.icon} size={18} /><span>{item.label}</span></Link>)}
-    </nav>
   </div>;
 }

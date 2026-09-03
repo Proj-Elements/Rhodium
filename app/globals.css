@@ -77,6 +77,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .page-header h1 { max-width: 740px; margin: 0; font-size: 44px; font-weight: 400; letter-spacing: 0; line-height: 1.12; }
 .page-description { max-width: 650px; margin: 13px 0 0; color: var(--body); font-size: 14px; line-height: 1.6; }
 .page-cta { margin-top: 2px; }
+/* Mobile chrome is unmounted on wide screens via matchMedia in app-shell;
+   the display:none here is defense-in-depth (e.g. before JS hydrates). */
 .mobile-topbar, .mobile-nav { display: none; }
 .page-content { max-width: 1160px; margin: 0 auto; padding-top: 27px; }
 
