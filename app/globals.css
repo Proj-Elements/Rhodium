@@ -27,6 +27,12 @@
   --lavender: #c0a8dd;
   --gold: #c08532;
   --yellow: #a97620;
+  /* Category icon tile surfaces (used via lib/category-colors). */
+  --cat-blue-surface: #edf3fb;
+  --cat-lavender-surface: #f4effa;
+  --cat-gold-surface: #fbf3e5;
+  --cat-mint-surface: #edf7ee;
+  --cat-peach-surface: #fbefea;
   --on-primary: #ffffff;
   /* Inverse-surface accents (text on the dark balance card / ink toast) */
   --on-ink-muted: #b9b8b0;
@@ -34,6 +40,9 @@
   --on-ink-accent: #ffb28f;
   --ink-border: #4d4d45;
   --ink-track: #53534b;
+  --ink-card-bg: #26251e;
+  --ink-card-border: #4d4d45;
+  --ink-card-track: #53534b;
   /* Warm prompt panels */
   --prompt-warm-border: #ead7c9;
   --prompt-warm-bg: #fff7ed;
@@ -77,20 +86,28 @@
   --income-soft: #38202a;
   --expense: #4cb78f;
   --expense-soft: #1c2f27;
-  --blue: #7e97bd;
+  --blue: #8aa6cd;
   --mint: #83b287;
   --peach: #c99a82;
   --lavender: #a98fc7;
   --gold: #d1a05a;
   --yellow: #c99a4a;
+  /* Icon tiles: dark tinted surfaces instead of the light pastels — icons
+     stay legible without glowing white boxes on the dark canvas. */
+  --cat-blue-surface: #232c39;
+  --cat-lavender-surface: #2c2536;
+  --cat-gold-surface: #33291a;
+  --cat-mint-surface: #1f2f24;
+  --cat-peach-surface: #352620;
   --on-primary: #1a1207;
-  /* The "ink" balance card becomes a light panel in dark mode, so the
-     on-ink accents flip to colors readable on a light surface. */
+  /* The "ink" balance card keeps a dark surface in dark mode, with its own
+     border and progress-track shades tuned for it. */
+  --ink-card-bg: #232320;
+  --ink-card-border: #3d3d37;
+  --ink-card-track: #3d3d37;
   --on-ink-muted: #7a786e;
   --on-ink-soft: #b03a52;
   --on-ink-accent: #c2570f;
-  --ink-border: #d5d3ca;
-  --ink-track: #d8d7d0;
   --prompt-warm-border: #4a3a2c;
   --prompt-warm-bg: #2b241c;
   --prompt-warn-border: #54303b;
@@ -162,10 +179,10 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .sync-dot.error { background: var(--error); }
 .sidebar-footer { margin: 11px 10px 0; color: var(--muted-soft); font-family: var(--mono); font-size: 9px; letter-spacing: .25px; }
 
-/* Color mode toggle (sidebar) */
+/* Color mode toggle (sidebar, icon-only) */
 .theme-toggle-row { margin: 16px 10px 0; }
-.color-mode-toggle { display: flex; gap: 3px; padding: 4px; border: 1px solid var(--line); border-radius: 7px; background: var(--segmented-track); }
-.color-mode-toggle button { display: inline-flex; min-height: 30px; flex: 1; align-items: center; justify-content: center; gap: 5px; padding: 5px 6px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 11px; transition: background .16s ease, color .16s ease; }
+.color-mode-toggle { display: inline-flex; gap: 3px; padding: 4px; border: 1px solid var(--line); border-radius: 7px; background: var(--segmented-track); }
+.color-mode-toggle button { display: inline-flex; width: 34px; min-height: 30px; align-items: center; justify-content: center; padding: 5px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); transition: background .16s ease, color .16s ease; }
 .color-mode-toggle button:hover { color: var(--ink); }
 .color-mode-toggle button.active { background: var(--card); color: var(--ink); }
 .color-mode-toggle button:disabled { cursor: default; opacity: .6; }
@@ -221,7 +238,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 /* Dashboard */
 .dashboard-top { display: grid; grid-template-columns: minmax(280px, 1.35fr) repeat(3, minmax(150px, .76fr)); gap: 12px; }
 .balance-card { position: relative; display: flex; min-height: 184px; flex-direction: column; justify-content: space-between; padding: 24px; overflow: hidden; border-radius: 8px; background: var(--ink); color: var(--canvas); }
-:root[data-color-scheme="dark"] .balance-card { background: var(--ink-card-bg, var(--ink)); color: var(--ink-card-fg, var(--canvas)); }
+:root[data-color-scheme="dark"] .balance-card { border: 1px solid var(--ink-card-border, var(--ink-border)); background: var(--ink-card-bg, var(--ink)); color: var(--canvas); }
 .balance-card::after { position: absolute; right: 24px; top: 25px; width: 7px; height: 7px; border-radius: 50%; background: var(--orange); content: ""; }
 .balance-card .card-label { color: var(--on-ink-muted); }
 .balance-card h2 { margin: 4px 0 0; font-family: var(--mono); font-size: 40px; font-weight: 400; letter-spacing: 0; line-height: 1.1; }
@@ -230,6 +247,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .balance-card-meta strong { display: block; margin-top: 2px; color: var(--canvas); font-family: var(--mono); font-size: 12px; font-weight: 400; }
 .balance-percent { color: var(--on-ink-accent); font-family: var(--mono); font-size: 12px; }
 .progress-track { height: 5px; margin-top: 9px; overflow: hidden; border-radius: 99px; background: var(--ink-track); }
+:root[data-color-scheme="dark"] .progress-track { background: var(--ink-card-track, var(--ink-track)); }
 .progress-track span { display: block; height: 100%; min-width: 0; max-width: 100%; border-radius: inherit; background: var(--orange); transition: width .35s ease; }
 .stat-card { display: flex; min-height: 184px; flex-direction: column; justify-content: space-between; padding: 20px; }
 .stat-card .stat-icon { display: grid; place-items: center; width: 34px; height: 34px; border: 1px solid var(--line); border-radius: 7px; background: var(--orange-soft); color: var(--orange); }

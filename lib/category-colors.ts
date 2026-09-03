@@ -1,9 +1,9 @@
 export const categoryPalette = [
-  { color: "var(--blue)", surface: "#edf3fb" },
-  { color: "var(--lavender)", surface: "#f4effa" },
-  { color: "var(--gold)", surface: "#fbf3e5" },
-  { color: "var(--mint)", surface: "#edf7ee" },
-  { color: "var(--peach)", surface: "#fbefea" },
+  { color: "var(--blue)", surface: "var(--cat-blue-surface)" },
+  { color: "var(--lavender)", surface: "var(--cat-lavender-surface)" },
+  { color: "var(--gold)", surface: "var(--cat-gold-surface)" },
+  { color: "var(--mint)", surface: "var(--cat-mint-surface)" },
+  { color: "var(--peach)", surface: "var(--cat-peach-surface)" },
   { color: "var(--muted)", surface: "var(--canvas)" },
 ];
 

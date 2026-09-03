@@ -26,9 +26,9 @@ export function ColorModeToggle({ mode, onChange, hydrated }: { mode: ColorMode;
           className={mode === option.value ? "active" : ""}
           onClick={() => onChange(option.value)}
           title={option.label}
+          aria-label={option.label}
         >
-          <span className="color-mode-icon"><Icon name={option.icon} size={14} /></span>
-          <span className="color-mode-label">{option.label}</span>
+          <span className="color-mode-icon"><Icon name={option.icon} size={15} /></span>
         </button>
       ))}
     </div>

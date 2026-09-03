@@ -80,10 +80,10 @@ export function AppShell({ children }: { children: ReactNode }) {
         <p className="nav-label secondary-label">工具</p>
         {secondaryItems.map((item) => <NavLink key={item.href} item={item} active={pathname === item.href} />)}
       </nav>
+      <div className="sidebar-spacer" />
       <div className="theme-toggle-row">
         <ColorModeToggle mode={mode} onChange={setColorMode} hydrated={themeHydrated} />
       </div>
-      <div className="sidebar-spacer" />
       <div className="sidebar-note">
         <span className="note-kicker"><Icon name="spark" size={12} /> SMALL HABIT</span>
         <p>记下一杯饮料，<br />也记住自己的节奏。</p>
