@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { ensureDefaultCategories } from "@/lib/seed";
 import { serializeTransaction } from "@/lib/serializers";
 import { syncSubscriptions } from "@/lib/subscriptions";
+import { getBudgetPreset, hasExplicitBudget } from "@/lib/budget";
 
 export const dynamic = "force-dynamic";
 
@@ -29,8 +30,9 @@ export async function GET(request: Request) {
     const chartDayCount = Math.floor((focusDate.getTime() - chartStart.getTime()) / 86_400_000) + 1;
 
     const monthTxWhere = { deletedAt: null as null, occurredOn: { gte: start, lt: nextStart } };
-    const [budget, expense, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups] = await Promise.all([
-      prisma.monthlyBudget.findUnique({ where: { month: start } }),
+    const [preset, hasExplicit, expense, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups] = await Promise.all([
+      getBudgetPreset(),
+      hasExplicitBudget(month),
       prisma.transaction.aggregate({
         where: { ...monthTxWhere, type: TransactionType.EXPENSE },
         _sum: { amountCents: true },
@@ -87,12 +89,14 @@ export async function GET(request: Request) {
     const focusDateExpenseCents = focusGroups.find((group) => group.type === TransactionType.EXPENSE)?._sum.amountCents ?? 0;
     const focusDateIncomeCents = focusGroups.find((group) => group.type === TransactionType.INCOME)?._sum.amountCents ?? 0;
     const expenseCents = expense._sum.amountCents ?? 0;
-    const budgetCents = budget?.amountCents ?? null;
+    // Effective budget = explicit month row, falling back to the preset.
+    const budgetCents = hasExplicit ? await prisma.monthlyBudget.findUnique({ where: { month: start }, select: { amountCents: true } }).then((row) => row?.amountCents ?? null) : preset;
     return NextResponse.json({
       month,
       today,
       focusDate: dateOnlyKey(focusDate),
-      budget: budget ? { amountCents: budgetCents as number } : null,
+      budget: budgetCents === null ? null : { amountCents: budgetCents },
+      budgetSource: budgetCents === null ? "none" : hasExplicit ? "month" : "preset",
       expenseCents,
       incomeCents: income._sum.amountCents ?? 0,
       remainingCents: calculateRemaining(budgetCents, expenseCents),

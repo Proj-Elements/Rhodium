@@ -59,7 +59,6 @@ export default function DashboardPage() {
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [budgetInput, setBudgetInput] = useState("");
-  const [budgetEditing, setBudgetEditing] = useState(false);
   const [budgetSaving, setBudgetSaving] = useState(false);
   const { message, flash } = useFlash();
 
@@ -77,8 +76,7 @@ export default function DashboardPage() {
         ]);
         setData(dashboard);
         setCategories(categoryResult.categories || []);
-        setBudgetInput(dashboard.budget ? (dashboard.budget.amountCents / 100).toFixed(2) : "");
-        setBudgetEditing(false);
+        setBudgetInput("");
       } catch (loadError) {
         if (loadError instanceof DOMException && loadError.name === "AbortError") return;
         setError(errorMessage(loadError, "暂时无法打开仪表盘"));
@@ -99,7 +97,7 @@ export default function DashboardPage() {
     try {
       await apiFetch(`/api/budgets/${month}`, { method: "PUT", json: { amount: budgetInput } });
       flash("预算已更新");
-      setBudgetEditing(false);
+      setBudgetInput("");
       reload();
     } catch (saveError) {
       flash(errorMessage(saveError, "预算保存失败"));
@@ -115,10 +113,11 @@ export default function DashboardPage() {
     timeZone: "Asia/Shanghai",
   }).format(new Date()), []);
 
-  const remainingDays = data ? Math.max(data.daysInMonth - data.daysElapsed, 0) : 0;
-  const dailyAllowance = data?.budget && data.monthStatus === "current" ? Math.round(Math.max(data.remainingCents ?? 0, 0) / Math.max(remainingDays, 1)) : null;
   const focusDateLabel = data?.monthStatus === "future" ? "未开始" : data && data.focusDate === data.today ? "今天" : data ? dateLabel(data.focusDate) : "";
   const chartTitle = data?.monthStatus === "future" ? "月初预览" : "最近 7 天";
+  // Once a preset (or explicit budget) covers the month, the prompt banner
+  // stays hidden — budget management lives in 设置.
+  const showBudgetPrompt = Boolean(data && data.budgetSource === "none");
 
   return <AppShell>
     <div className="toolbar">
@@ -143,14 +142,19 @@ export default function DashboardPage() {
         <div className="card stat-card"><span className="stat-icon"><Icon name="receipt" size={17} /></span><div><p className="card-label">RECORDED</p><div className="stat-value">{data.transactionCount}<span className="stat-unit"> 笔</span></div><div className="stat-sub">支出 {data.expenseTransactionCount} 笔 · 收入 {data.transactionCount - data.expenseTransactionCount} 笔</div></div></div>
       </section>
 
-      <div className={`budget-prompt${data.remainingCents !== null && data.remainingCents < 0 ? " is-warning" : ""}`}>
+      {showBudgetPrompt && <div className="budget-prompt">
         <div className="budget-copy">
-          <strong>{data.monthStatus === "future" ? "提前为这个月设一个预算" : !data.budget ? "给这个月设一个预算" : data.remainingCents !== null && data.remainingCents < 0 ? "预算已经超出，先看见它" : `本月预算 ${formatMoney(data.budget.amountCents)}`}</strong>
-          <span>{data.monthStatus === "future" ? "先设下边界，等月份开始后再慢慢记录。" : !data.budget ? "先有一个边界，月底才知道余量。" : data.remainingCents !== null && data.remainingCents < 0 ? "不用责备自己，调整接下来的节奏就好。" : "预算可以随着生活变化调整。"}</span>
+          <strong>{data.monthStatus === "future" ? "提前为这个月设一个预算" : "给这个月设一个预算"}</strong>
+          <span>也可以在「设置」里填一个每月默认预算，之后每个月都会自动沿用。</span>
         </div>
-        {data.budget && dailyAllowance !== null && <div className="budget-pace"><strong>{formatMoney(dailyAllowance)} / 天</strong>剩余天数的可用节奏</div>}
-        {data.budget && !budgetEditing ? <button type="button" className="button button-secondary button-small budget-edit-button" onClick={() => setBudgetEditing(true)}><Icon name="edit" size={14} />修改本月预算</button> : <div className="inline-budget"><input className="form-control" inputMode="decimal" aria-label="本月预算金额" placeholder="例如 3000" value={budgetInput} onChange={(event) => setBudgetInput(event.target.value)} /><button type="button" className={`button ${data.budget ? "button-secondary" : "button-primary"} button-small`} onClick={() => void saveBudget()} disabled={budgetSaving}>{budgetSaving ? "保存中" : data.budget ? "更新预算" : "设置预算"}</button>{data.budget && <button type="button" className="button button-quiet button-small" onClick={() => setBudgetEditing(false)} disabled={budgetSaving}>取消</button>}</div>}
-      </div>
+        <div className="inline-budget"><input className="form-control" inputMode="decimal" aria-label="本月预算金额" placeholder="例如 3000" value={budgetInput} onChange={(event) => setBudgetInput(event.target.value)} /><button type="button" className="button button-primary button-small" onClick={() => void saveBudget()} disabled={budgetSaving}>{budgetSaving ? "保存中" : "设置预算"}</button></div>
+      </div>}
+      {!showBudgetPrompt && data?.budget && data.remainingCents !== null && data.remainingCents < 0 && <div className="budget-prompt is-warning">
+        <div className="budget-copy">
+          <strong>预算已经超出，先看见它</strong>
+          <span>不用责备自己，调整接下来的节奏就好。可以在「设置」里修改预算。</span>
+        </div>
+      </div>}
 
       <div className="dashboard-grid">
         <section className="card chart-card"><div className="section-heading"><div><h2>{chartTitle}</h2><p>{data.monthStatus === "future" ? "月份开始后，这里会记录每天的花销。" : "花销的节奏，比总额更早提醒你。"}</p></div><Link className="text-link" href={`/transactions?month=${month}`}>查看全部 <Icon name="arrow" size={14} /></Link></div><SpendingChart days={data.recentExpenses} /></section>

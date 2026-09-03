@@ -86,6 +86,14 @@ model MonthlyBudget {
   updatedAt   DateTime @updatedAt
 }
 
+/// Single-row table: the default budget applied to every month without an
+/// explicit MonthlyBudget row. id is always 1.
+model BudgetPreset {
+  id          Int      @id @default(1)
+  amountCents Int
+  updatedAt   DateTime @updatedAt
+}
+
 model MonthlySettlement {
   id                   String    @id @default(cuid())
   month                DateTime  @unique @db.Date

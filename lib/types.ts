@@ -26,6 +26,8 @@ export type DashboardDTO = {
   focusDate: string;
   monthStatus: "past" | "current" | "future";
   budget: { amountCents: number } | null;
+  /** Where the effective budget comes from: explicit month row, preset, or unset. */
+  budgetSource: "month" | "preset" | "none";
   expenseCents: number;
   incomeCents: number;
   remainingCents: number | null;
