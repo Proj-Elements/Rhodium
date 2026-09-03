@@ -7,16 +7,17 @@ import { categoryPatchSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
-type Context = { params: { id: string } };
+type Context = { params: Promise<{ id: string }> };
 
 export async function PATCH(request: Request, { params }: Context) {
   try {
+    const { id } = await params;
     const body = categoryPatchSchema.parse(await parseJsonBody(request));
-    const category = await prisma.category.findUnique({ where: { id: params.id } });
+    const category = await prisma.category.findUnique({ where: { id } });
     if (!category) throw notFound("分类不存在");
     if (category.isSystem && body.archived === true) return jsonError("系统分类不能停用", 400);
     const updated = await prisma.category.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         ...(typeof body.name === "string" ? { name: body.name } : {}),
         ...(typeof body.archived === "boolean" ? { archivedAt: body.archived ? new Date() : null } : {}),

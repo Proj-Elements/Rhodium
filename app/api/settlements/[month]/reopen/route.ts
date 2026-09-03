@@ -6,12 +6,13 @@ import { serializeSettlement } from "@/lib/serializers";
 
 export const dynamic = "force-dynamic";
 
-type Context = { params: { month: string } };
+type Context = { params: Promise<{ month: string }> };
 
 export async function POST(_request: Request, { params }: Context) {
   try {
-    parseMonth(params.month);
-    const settlement = await prisma.monthlySettlement.update({ where: { month: monthStart(params.month) }, data: { reopenedAt: new Date() } });
+    const { month } = await params;
+    parseMonth(month);
+    const settlement = await prisma.monthlySettlement.update({ where: { month: monthStart(month) }, data: { reopenedAt: new Date() } });
     return NextResponse.json({ settlement: serializeSettlement(settlement) });
   } catch (error) {
     return handleApiError(error);

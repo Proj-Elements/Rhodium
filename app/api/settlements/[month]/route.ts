@@ -6,13 +6,14 @@ import { syncSubscriptions } from "@/lib/subscriptions";
 
 export const dynamic = "force-dynamic";
 
-type Context = { params: { month: string } };
+type Context = { params: Promise<{ month: string }> };
 
 export async function GET(_request: Request, { params }: Context) {
   try {
-    parseMonth(params.month);
+    const { month } = await params;
+    parseMonth(month);
     await syncSubscriptions();
-    return NextResponse.json({ summary: await getMonthSummary(params.month) });
+    return NextResponse.json({ summary: await getMonthSummary(month) });
   } catch (error) {
     return handleApiError(error);
   }

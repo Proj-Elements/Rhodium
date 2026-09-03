@@ -10,17 +10,18 @@ import { isMonthLocked } from "@/lib/summary";
 
 export const dynamic = "force-dynamic";
 
-type Context = { params: { id: string } };
+type Context = { params: Promise<{ id: string }> };
 
 export async function PATCH(request: Request, { params }: Context) {
   try {
+    const { id } = await params;
     const body = await parseJsonBody(request);
-    const existing = await prisma.transaction.findUnique({ where: { id: params.id }, select: { occurredOn: true } });
+    const existing = await prisma.transaction.findUnique({ where: { id }, select: { occurredOn: true } });
     if (!existing) throw notFound("账目不存在");
     if (await isMonthLocked(monthKey(existing.occurredOn))) throw conflict("本月已经结算，请先重新打开本月");
     if (body.restore === true) {
       const restored = await prisma.transaction.update({
-        where: { id: params.id },
+        where: { id },
         data: { deletedAt: null },
         include: { category: true, subscription: { select: { name: true } } },
       });
@@ -34,7 +35,7 @@ export async function PATCH(request: Request, { params }: Context) {
     });
     if (!category) return jsonError("请选择有效的分类");
     const transaction = await prisma.transaction.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         type: parsed.type === "expense" ? TransactionType.EXPENSE : TransactionType.INCOME,
         amountCents: moneyToCents(parsed.amount),
@@ -52,11 +53,12 @@ export async function PATCH(request: Request, { params }: Context) {
 
 export async function DELETE(_request: Request, { params }: Context) {
   try {
-    const existing = await prisma.transaction.findUnique({ where: { id: params.id }, select: { occurredOn: true } });
+    const { id } = await params;
+    const existing = await prisma.transaction.findUnique({ where: { id }, select: { occurredOn: true } });
     if (!existing) throw notFound("账目不存在");
     if (await isMonthLocked(monthKey(existing.occurredOn))) throw conflict("本月已经结算，请先重新打开本月");
     const transaction = await prisma.transaction.update({
-      where: { id: params.id },
+      where: { id },
       data: { deletedAt: new Date() },
     });
     return NextResponse.json({ id: transaction.id, deleted: true });

@@ -8,12 +8,13 @@ import { isMonthLocked } from "@/lib/summary";
 
 export const dynamic = "force-dynamic";
 
-type Context = { params: { month: string } };
+type Context = { params: Promise<{ month: string }> };
 
 export async function GET(_request: Request, { params }: Context) {
   try {
-    parseMonth(params.month);
-    const budget = await prisma.monthlyBudget.findUnique({ where: { month: monthRange(params.month).start } });
+    const { month } = await params;
+    parseMonth(month);
+    const budget = await prisma.monthlyBudget.findUnique({ where: { month: monthRange(month).start } });
     return NextResponse.json({ budget: budget ? { amountCents: budget.amountCents } : null });
   } catch (error) {
     return handleApiError(error);
@@ -22,14 +23,15 @@ export async function GET(_request: Request, { params }: Context) {
 
 export async function PUT(request: Request, { params }: Context) {
   try {
-    parseMonth(params.month);
+    const { month } = await params;
+    parseMonth(month);
     const body = budgetSchema.parse(await parseJsonBody(request));
-    if (await isMonthLocked(params.month)) throw conflict("本月已经结算，请先重新打开本月");
+    if (await isMonthLocked(month)) throw conflict("本月已经结算，请先重新打开本月");
     const amountCents = moneyToCents(body.amount);
-    const month = monthRange(params.month).start;
+    const monthDate = monthRange(month).start;
     const budget = await prisma.monthlyBudget.upsert({
-      where: { month },
-      create: { month, amountCents },
+      where: { month: monthDate },
+      create: { month: monthDate, amountCents },
       update: { amountCents },
     });
     return NextResponse.json({ budget: { amountCents: budget.amountCents } });

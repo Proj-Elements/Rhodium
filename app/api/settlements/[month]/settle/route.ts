@@ -8,18 +8,19 @@ import { syncSubscriptions } from "@/lib/subscriptions";
 
 export const dynamic = "force-dynamic";
 
-type Context = { params: { month: string } };
+type Context = { params: Promise<{ month: string }> };
 
 export async function POST(_request: Request, { params }: Context) {
   try {
-    parseMonth(params.month);
-    if (params.month > todayInShanghai().slice(0, 7)) return jsonError("未来月份还不能结算", 400);
+    const { month } = await params;
+    parseMonth(month);
+    if (month > todayInShanghai().slice(0, 7)) return jsonError("未来月份还不能结算", 400);
     await syncSubscriptions();
-    const summary = await getMonthSummary(params.month);
+    const summary = await getMonthSummary(month);
     const settlement = await prisma.monthlySettlement.upsert({
-      where: { month: monthStart(params.month) },
+      where: { month: monthStart(month) },
       create: {
-        month: monthStart(params.month),
+        month: monthStart(month),
         budgetAmountCents: summary.budgetCents ?? 0,
         expenseAmountCents: summary.expenseCents,
         incomeAmountCents: summary.incomeCents,
@@ -37,7 +38,7 @@ export async function POST(_request: Request, { params }: Context) {
     });
     return NextResponse.json({
       settlement: {
-        month: params.month,
+        month,
         budgetAmountCents: settlement.budgetAmountCents,
         expenseAmountCents: settlement.expenseAmountCents,
         incomeAmountCents: settlement.incomeAmountCents,

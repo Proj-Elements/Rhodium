@@ -9,13 +9,14 @@ import { serializeSubscription, subscriptionInclude } from "@/lib/subscription-s
 
 export const dynamic = "force-dynamic";
 
-type Context = { params: { id: string } };
+type Context = { params: Promise<{ id: string }> };
 
 
 export async function PATCH(request: Request, { params }: Context) {
   try {
+    const { id } = await params;
     const body = await parseJsonBody(request);
-    const existing = await prisma.subscription.findUnique({ where: { id: params.id }, select: { id: true } });
+    const existing = await prisma.subscription.findUnique({ where: { id }, select: { id: true } });
     if (!existing) throw notFound("固定支出不存在");
 
     // Toggle-only bodies ({ active }) are validated strictly so unknown fields
@@ -23,7 +24,7 @@ export async function PATCH(request: Request, { params }: Context) {
     const toggle = subscriptionToggleSchema.safeParse(body);
     if (toggle.success) {
       const subscription = await prisma.subscription.update({
-        where: { id: params.id },
+        where: { id },
         data: { active: toggle.data.active },
         include: subscriptionInclude,
       });
@@ -35,7 +36,7 @@ export async function PATCH(request: Request, { params }: Context) {
     const category = await prisma.category.findFirst({ where: { id: parsed.categoryId, archivedAt: null, OR: [{ type: "EXPENSE" }, { type: "BOTH" }] } });
     if (!category) return jsonError("订阅必须使用有效的支出分类");
     const subscription = await prisma.subscription.update({
-      where: { id: params.id },
+      where: { id },
       data: {
         name: parsed.name,
         amountCents: moneyToCents(parsed.amount),
@@ -57,14 +58,15 @@ export async function PATCH(request: Request, { params }: Context) {
 
 export async function DELETE(_request: Request, { params }: Context) {
   try {
-    const usage = await prisma.transaction.count({ where: { subscriptionId: params.id } });
+    const { id } = await params;
+    const usage = await prisma.transaction.count({ where: { subscriptionId: id } });
     if (usage > 0) {
       // Keep the subscription for its historical ledger entries; just pause it.
-      const subscription = await prisma.subscription.update({ where: { id: params.id }, data: { active: false }, include: subscriptionInclude });
+      const subscription = await prisma.subscription.update({ where: { id }, data: { active: false }, include: subscriptionInclude });
       return NextResponse.json({ subscription: serializeSubscription(subscription), archived: true });
     }
-    await prisma.subscription.delete({ where: { id: params.id } });
-    return NextResponse.json({ id: params.id, deleted: true });
+    await prisma.subscription.delete({ where: { id } });
+    return NextResponse.json({ id, deleted: true });
   } catch (error) {
     return handleApiError(error);
   }

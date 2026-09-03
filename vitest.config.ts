@@ -10,5 +10,10 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
+    // Sequential execution in one worker: the suite is small and tests share
+    // a module registry, so worker-parallelism overhead is not worth it.
+    pool: "forks",
+    maxWorkers: 1,
+    fileParallelism: false,
   },
 });
