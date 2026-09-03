@@ -17,7 +17,15 @@ const defaults = [
   ["其他收入", CategoryType.INCOME],
 ] as const;
 
+let seeded = false;
+
+/**
+ * Seed default categories once per process. The in-memory flag means steady
+ * state GET requests no longer issue a `createMany` write on every call
+ * (fresh processes after a deploy still seed exactly once).
+ */
 export async function ensureDefaultCategories() {
+  if (seeded) return;
   await prisma.category.createMany({
     data: defaults.map(([name, type], index) => ({
       name,
@@ -27,4 +35,5 @@ export async function ensureDefaultCategories() {
     })),
     skipDuplicates: true,
   });
+  seeded = true;
 }

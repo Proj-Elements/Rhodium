@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
 import { CategoryType } from "@prisma/client";
-import { handleApiError, parseJsonBody, jsonError } from "@/lib/api";
+import { handleApiError, parseJsonBody } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultCategories } from "@/lib/seed";
+import { serializeCategory } from "@/lib/serializers";
 import { categorySchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export async function GET() {
   try {
     await ensureDefaultCategories();
     const categories = await prisma.category.findMany({ orderBy: [{ archivedAt: "asc" }, { sortOrder: "asc" }, { name: "asc" }] });
-    return NextResponse.json({ categories });
+    return NextResponse.json({ categories: categories.map(serializeCategory) });
   } catch (error) {
     return handleApiError(error);
   }
@@ -20,7 +21,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = categorySchema.parse(await parseJsonBody(request));
-    const category = await prisma.category.create({
+    const created = await prisma.category.create({
       data: {
         name: body.name,
         type: body.type === "expense" ? CategoryType.EXPENSE : body.type === "income" ? CategoryType.INCOME : CategoryType.BOTH,
@@ -28,11 +29,8 @@ export async function POST(request: Request) {
         sortOrder: 100,
       },
     });
-    return NextResponse.json({ category }, { status: 201 });
+    return NextResponse.json({ category: serializeCategory(created) }, { status: 201 });
   } catch (error) {
-    if (error instanceof Error && "code" in error && (error as { code?: string }).code === "P2002") {
-      return jsonError("已经存在同名分类");
-    }
     return handleApiError(error);
   }
 }

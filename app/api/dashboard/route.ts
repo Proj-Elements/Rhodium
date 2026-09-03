@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { TransactionType } from "@prisma/client";
-import { calculateRemaining, calculateUsage, dateOnlyKey, daysInMonth, monthEnd, monthStart, parseMonth, todayInShanghai } from "@/lib/domain";
-import { handleApiError } from "@/lib/api";
+import { calculateRemaining, calculateUsage, dateOnlyKey, daysInMonth, parseMonth, todayInShanghai } from "@/lib/domain";
+import { handleApiError, monthRange } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultCategories } from "@/lib/seed";
 import { serializeTransaction } from "@/lib/serializers";
@@ -17,52 +17,48 @@ export async function GET(request: Request) {
     await ensureDefaultCategories();
     await syncSubscriptions();
 
-    const start = monthStart(month);
-    const end = monthEnd(month);
-    const nextStart = new Date(end);
-    nextStart.setUTCDate(nextStart.getUTCDate() + 1);
+    const { start, nextStart } = monthRange(month);
     const today = todayInShanghai();
     const currentMonth = today.slice(0, 7);
     const todayDate = new Date(`${today}T00:00:00.000Z`);
     const monthStatus: "past" | "current" | "future" = month < currentMonth ? "past" : month > currentMonth ? "future" : "current";
-    const focusDate = monthStatus === "current" ? todayDate : monthStatus === "past" ? end : start;
+    const focusDate = monthStatus === "current" ? todayDate : monthStatus === "past" ? monthRange(month).end : start;
     const recentStart = new Date(focusDate);
     recentStart.setUTCDate(recentStart.getUTCDate() - 6);
     const chartStart = month === currentMonth || recentStart >= start ? recentStart : start;
     const chartDayCount = Math.floor((focusDate.getTime() - chartStart.getTime()) / 86_400_000) + 1;
 
-    const [budget, expense, income, focusExpense, focusIncome, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups] = await Promise.all([
+    const monthTxWhere = { deletedAt: null as null, occurredOn: { gte: start, lt: nextStart } };
+    const [budget, expense, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups] = await Promise.all([
       prisma.monthlyBudget.findUnique({ where: { month: start } }),
       prisma.transaction.aggregate({
-        where: { type: TransactionType.EXPENSE, deletedAt: null, occurredOn: { gte: start, lt: nextStart } },
+        where: { ...monthTxWhere, type: TransactionType.EXPENSE },
         _sum: { amountCents: true },
       }),
       prisma.transaction.aggregate({
-        where: { type: TransactionType.INCOME, deletedAt: null, occurredOn: { gte: start, lt: nextStart } },
+        where: { ...monthTxWhere, type: TransactionType.INCOME },
         _sum: { amountCents: true },
       }),
-      prisma.transaction.aggregate({
-        where: { type: TransactionType.EXPENSE, deletedAt: null, occurredOn: { equals: focusDate } },
-        _sum: { amountCents: true },
-      }),
-      prisma.transaction.aggregate({
-        where: { type: TransactionType.INCOME, deletedAt: null, occurredOn: { equals: focusDate } },
+      // One grouped query for focus-date expense+income (was two aggregates).
+      prisma.transaction.groupBy({
+        by: ["occurredOn", "type"],
+        where: { deletedAt: null, occurredOn: { equals: focusDate } },
         _sum: { amountCents: true },
       }),
       prisma.transaction.findMany({
-        where: { deletedAt: null, occurredOn: { gte: start, lt: nextStart } },
+        where: monthTxWhere,
         include: { category: true, subscription: { select: { name: true } } },
         orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }],
         take: 10,
       }),
       prisma.transaction.groupBy({
         by: ["categoryId"],
-        where: { type: TransactionType.EXPENSE, deletedAt: null, occurredOn: { gte: start, lt: nextStart } },
+        where: { ...monthTxWhere, type: TransactionType.EXPENSE },
         _sum: { amountCents: true },
         orderBy: { _sum: { amountCents: "desc" } },
       }),
-      prisma.transaction.count({ where: { deletedAt: null, occurredOn: { gte: start, lt: nextStart } } }),
-      prisma.transaction.count({ where: { type: TransactionType.EXPENSE, deletedAt: null, occurredOn: { gte: start, lt: nextStart } } }),
+      prisma.transaction.count({ where: monthTxWhere }),
+      prisma.transaction.count({ where: { ...monthTxWhere, type: TransactionType.EXPENSE } }),
       prisma.transaction.groupBy({
         by: ["occurredOn"],
         where: { type: TransactionType.EXPENSE, deletedAt: null, occurredOn: { gte: chartStart, lte: focusDate } },
@@ -88,15 +84,15 @@ export async function GET(request: Request) {
       return { date: dateKey, amountCents: expenseByDate.get(dateKey) ?? 0, incomeCents: incomeByDate.get(dateKey) ?? 0 };
     });
 
+    const focusDateExpenseCents = focusGroups.find((group) => group.type === TransactionType.EXPENSE)?._sum.amountCents ?? 0;
+    const focusDateIncomeCents = focusGroups.find((group) => group.type === TransactionType.INCOME)?._sum.amountCents ?? 0;
     const expenseCents = expense._sum.amountCents ?? 0;
     const budgetCents = budget?.amountCents ?? null;
-    const focusDateExpenseCents = focusExpense._sum.amountCents ?? 0;
-    const focusDateIncomeCents = focusIncome._sum.amountCents ?? 0;
     return NextResponse.json({
       month,
       today,
       focusDate: dateOnlyKey(focusDate),
-      budget: budget ? { ...budget, month } : null,
+      budget: budget ? { amountCents: budgetCents as number } : null,
       expenseCents,
       incomeCents: income._sum.amountCents ?? 0,
       remainingCents: calculateRemaining(budgetCents, expenseCents),

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { handleApiError, parseJsonBody, jsonError } from "@/lib/api";
+import { notFound } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
+import { serializeCategory } from "@/lib/serializers";
+import { categoryPatchSchema } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
@@ -8,18 +11,18 @@ type Context = { params: { id: string } };
 
 export async function PATCH(request: Request, { params }: Context) {
   try {
-    const body = await parseJsonBody(request);
+    const body = categoryPatchSchema.parse(await parseJsonBody(request));
     const category = await prisma.category.findUnique({ where: { id: params.id } });
-    if (!category) return jsonError("分类不存在", 404);
-    if (category.isSystem && body.archived === true) return jsonError("系统分类不能停用");
+    if (!category) throw notFound("分类不存在");
+    if (category.isSystem && body.archived === true) return jsonError("系统分类不能停用", 400);
     const updated = await prisma.category.update({
       where: { id: params.id },
       data: {
-        ...(typeof body.name === "string" && body.name.trim() ? { name: body.name.trim() } : {}),
+        ...(typeof body.name === "string" ? { name: body.name } : {}),
         ...(typeof body.archived === "boolean" ? { archivedAt: body.archived ? new Date() : null } : {}),
       },
     });
-    return NextResponse.json({ category: updated });
+    return NextResponse.json({ category: serializeCategory(updated) });
   } catch (error) {
     return handleApiError(error);
   }

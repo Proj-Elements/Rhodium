@@ -2,6 +2,27 @@ const SHANGHAI_TIME_ZONE = "Asia/Shanghai";
 
 export type TransactionKind = "expense" | "income";
 
+/** Formatters are constructed once per module instead of per call (hot path). */
+const dayKeyFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: SHANGHAI_TIME_ZONE,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+const moneyFormatter = new Intl.NumberFormat("zh-CN", {
+  style: "currency",
+  currency: "CNY",
+  minimumFractionDigits: 2,
+});
+
+const weekdayDateFormatter = new Intl.DateTimeFormat("zh-CN", {
+  month: "numeric",
+  day: "numeric",
+  weekday: "short",
+  timeZone: "UTC",
+});
+
 export function parseDateOnly(value: string): Date {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("日期格式应为 YYYY-MM-DD");
   const date = new Date(`${value}T00:00:00.000Z`);
@@ -22,6 +43,12 @@ export function monthKey(value: Date): string {
   return value.toISOString().slice(0, 7);
 }
 
+/**
+ * Canonical month-to-Date converter (first day of month, UTC).
+ * `monthStart` remains as the preferred alias; `monthDate` is kept temporarily
+ * and deprecated.
+ * @deprecated use `monthStart`
+ */
 export function monthDate(month: string): Date {
   return parseMonth(month);
 }
@@ -36,27 +63,25 @@ export function monthStart(month: string): Date {
   return parseMonth(month);
 }
 
+/** Last calendar day of the month, UTC. */
 export function monthEnd(month: string): Date {
   const date = parseMonth(addMonths(month, 1));
   date.setUTCDate(date.getUTCDate() - 1);
   return date;
 }
 
+/** Number of days in the month. */
 export function daysInMonth(month: string): number {
   return monthEnd(month).getUTCDate();
 }
 
+/** Current date in the app time zone as YYYY-MM-DD. */
 export function todayInShanghai(): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: SHANGHAI_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const value = Object.fromEntries(dayKeyFormatter.formatToParts(new Date()).map((part) => [part.type, part.value]));
   return `${value.year}-${value.month}-${value.day}`;
 }
 
+/** Clamp a recurring billing day (1-31) onto a real date in the month. */
 export function billingDate(month: string, billingDay: number): Date {
   const day = Math.min(Math.max(1, billingDay), daysInMonth(month));
   const date = parseMonth(month);
@@ -75,20 +100,7 @@ export function moneyToCents(value: string | number): number {
 
 export function formatMoney(cents: number | null | undefined): string {
   if (cents === null || cents === undefined) return "—";
-  return new Intl.NumberFormat("zh-CN", {
-    style: "currency",
-    currency: "CNY",
-    minimumFractionDigits: 2,
-  }).format(cents / 100);
-}
-
-export function formatCompactMoney(cents: number): string {
-  return new Intl.NumberFormat("zh-CN", {
-    style: "currency",
-    currency: "CNY",
-    notation: "compact",
-    maximumFractionDigits: cents >= 100000 ? 1 : 2,
-  }).format(cents / 100);
+  return moneyFormatter.format(cents / 100);
 }
 
 export function calculateRemaining(budgetCents: number | null, expenseCents: number): number | null {
@@ -101,13 +113,7 @@ export function calculateUsage(budgetCents: number | null, expenseCents: number)
 }
 
 export function dateLabel(value: string): string {
-  const date = parseDateOnly(value);
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "numeric",
-    day: "numeric",
-    weekday: "short",
-    timeZone: "UTC",
-  }).format(date);
+  return weekdayDateFormatter.format(parseDateOnly(value));
 }
 
 export function clampText(value: string | null | undefined, fallback = "未填写备注"): string {
