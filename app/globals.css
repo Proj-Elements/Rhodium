@@ -47,6 +47,68 @@
   --mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
+/* Dark scheme: the boot script in layout.tsx sets data-color-scheme on <html>
+   before first paint; use-color-mode keeps it in sync afterwards. */
+:root[data-color-scheme="dark"] {
+  color-scheme: dark;
+  --canvas: #161614;
+  --canvas-soft: #1d1d1a;
+  --card: #232320;
+  --ink: #eceae3;
+  --body: #b3b1a7;
+  --muted: #8b887d;
+  --muted-soft: #6f6d63;
+  --line: #34342f;
+  --line-soft: #2b2b27;
+  --line-strong: #43423b;
+  --orange: #ff6a1f;
+  --orange-dark: #ff8347;
+  --orange-soft: #3a2417;
+  --success: #4cb78f;
+  --success-soft: #1c2f27;
+  --error: #e06c85;
+  --error-soft: #38202a;
+  --blue: #7e97bd;
+  --mint: #83b287;
+  --peach: #c99a82;
+  --lavender: #a98fc7;
+  --gold: #d1a05a;
+  --yellow: #c99a4a;
+  --on-primary: #1a1207;
+  /* The "ink" balance card becomes a light panel in dark mode, so the
+     on-ink accents flip to colors readable on a light surface. */
+  --on-ink-muted: #7a786e;
+  --on-ink-soft: #b03a52;
+  --on-ink-accent: #c2570f;
+  --ink-border: #d5d3ca;
+  --ink-track: #d8d7d0;
+  --prompt-warm-border: #4a3a2c;
+  --prompt-warm-bg: #2b241c;
+  --prompt-warn-border: #54303b;
+  --prompt-gold-border: #4a4030;
+  --prompt-gold-bg: #2b261c;
+  --badge-amber-border: #4a412e;
+  --badge-amber-bg: #2d2818;
+  --badge-success-border: #2c4a3c;
+  --today-border: #a3654e;
+  --error-banner-border: #54303b;
+  --segmented-track: #2b2b27;
+  --track-neutral: #3d3d37;
+  --hover-strong: #6f6d63;
+  --shadow-soft: 0 5px 16px rgba(0, 0, 0, .5);
+  --scrim: rgba(0, 0, 0, .55);
+  --mobile-nav-bg: rgba(28, 28, 25, .96);
+  --chart-area-fill: rgba(255, 106, 31, .16);
+}
+
+:root:not([data-color-scheme="dark"]) {
+  color-scheme: light;
+  --shadow-soft: 0 5px 16px rgba(38, 37, 30, .11);
+  --scrim: rgba(37, 38, 33, .34);
+  --mobile-nav-bg: rgba(255, 255, 255, .96);
+  --chart-area-fill: rgba(240, 84, 36, .09);
+}
+
 * { box-sizing: border-box; }
 html { min-width: 320px; background: var(--canvas); }
 body { min-width: 320px; margin: 0; overflow-x: hidden; background: var(--canvas); color: var(--ink); font-family: var(--sans); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; }
@@ -90,6 +152,17 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .sync-dot.ready { background: var(--success); }
 .sync-dot.error { background: var(--error); }
 .sidebar-footer { margin: 11px 10px 0; color: var(--muted-soft); font-family: var(--mono); font-size: 9px; letter-spacing: .25px; }
+
+/* Color mode toggle (sidebar) */
+.theme-toggle-row { margin: 16px 10px 0; }
+.color-mode-toggle { display: flex; gap: 3px; padding: 4px; border: 1px solid var(--line); border-radius: 7px; background: var(--segmented-track); }
+.color-mode-toggle button { display: inline-flex; min-height: 30px; flex: 1; align-items: center; justify-content: center; gap: 5px; padding: 5px 6px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); font-size: 11px; transition: background .16s ease, color .16s ease; }
+.color-mode-toggle button:hover { color: var(--ink); }
+.color-mode-toggle button.active { background: var(--card); color: var(--ink); }
+.color-mode-toggle button:disabled { cursor: default; opacity: .6; }
+.color-mode-icon { display: grid; place-items: center; }
+.mobile-topbar-actions { display: inline-flex; align-items: center; gap: 8px; }
+.theme-cycle-button { width: 36px; min-height: 36px; }
 
 .main-content { width: calc(100% - 248px); min-height: 100vh; margin-left: 248px; padding: 43px 52px 88px; }
 .page-header { display: flex; max-width: 1160px; align-items: flex-start; justify-content: space-between; gap: 28px; margin: 0 auto; padding-bottom: 32px; border-bottom: 1px solid var(--line); }
@@ -139,6 +212,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 /* Dashboard */
 .dashboard-top { display: grid; grid-template-columns: minmax(280px, 1.35fr) repeat(3, minmax(150px, .76fr)); gap: 12px; }
 .balance-card { position: relative; display: flex; min-height: 184px; flex-direction: column; justify-content: space-between; padding: 24px; overflow: hidden; border-radius: 8px; background: var(--ink); color: var(--canvas); }
+:root[data-color-scheme="dark"] .balance-card { background: var(--ink-card-bg, var(--ink)); color: var(--ink-card-fg, var(--canvas)); }
 .balance-card::after { position: absolute; right: 24px; top: 25px; width: 7px; height: 7px; border-radius: 50%; background: var(--orange); content: ""; }
 .balance-card .card-label { color: var(--on-ink-muted); }
 .balance-card h2 { margin: 4px 0 0; font-family: var(--mono); font-size: 40px; font-weight: 400; letter-spacing: 0; line-height: 1.1; }
@@ -175,7 +249,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .chart-plot { position: relative; height: 175px; }
 .chart-svg { position: absolute; inset: 0; display: block; width: 100%; height: 175px; overflow: visible; }
 .chart-grid-line { stroke: var(--line-soft); stroke-width: 1; }
-.chart-area { fill: rgba(240, 84, 36, .09); }
+.chart-area { fill: var(--chart-area-fill); }
 .chart-line { fill: none; stroke: var(--orange); stroke-width: 2; vector-effect: non-scaling-stroke; }
 .chart-point { position: absolute; width: 8px; height: 8px; border: 2px solid var(--orange); border-radius: 50%; background: var(--card); pointer-events: none; transform: translate(-50%, -50%); }
 .chart-point[role="button"] { pointer-events: auto; cursor: pointer; }
@@ -322,6 +396,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .calendar-empty, .calendar-day { min-height: 76px; border: 1px solid var(--line-soft); border-radius: 6px; }
 .calendar-empty { background: var(--canvas-soft); border-color: transparent; }
 .calendar-day { position: relative; display: flex; align-items: flex-start; flex-direction: column; padding: 10px; background: linear-gradient(to bottom, rgba(199, 67, 95, var(--day-expense, 0)), var(--card)); color: var(--body); text-align: left; transition: border-color .16s ease, background .16s ease; }
+:root[data-color-scheme="dark"] .calendar-day { background: linear-gradient(to bottom, rgba(224, 108, 133, var(--day-expense, 0)), var(--card)); }
 .calendar-day:hover, .calendar-day.is-active { z-index: 3; border-color: var(--orange); background: var(--card); }
 .calendar-day.today { border-color: var(--today-border); }
 .calendar-day.today .calendar-day-number { color: var(--orange); font-weight: 650; }
@@ -329,7 +404,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .calendar-day-summary { display: flex; margin-top: auto; flex-direction: column; gap: 3px; font-family: var(--mono); font-size: 10px; line-height: 1.2; }
 .calendar-day-expense { color: var(--error); }
 .calendar-day-income { color: var(--success); }
-.calendar-tooltip { position: absolute; top: auto; right: auto; bottom: calc(100% + 8px); left: 50%; z-index: 4; display: flex; min-width: 136px; flex-direction: column; gap: 4px; padding: 9px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--card); box-shadow: 0 5px 16px rgba(38, 37, 30, .11); color: var(--body); font-family: var(--mono); font-size: 10px; line-height: 1.35; pointer-events: none; transform: translateX(-50%); }
+.calendar-tooltip { position: absolute; top: auto; right: auto; bottom: calc(100% + 8px); left: 50%; z-index: 4; display: flex; min-width: 136px; flex-direction: column; gap: 4px; padding: 9px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--card); box-shadow: var(--shadow-soft); color: var(--body); font-family: var(--mono); font-size: 10px; line-height: 1.35; pointer-events: none; transform: translateX(-50%); }
 .calendar-tooltip.edge-left { left: 0; transform: none; }
 .calendar-tooltip.edge-right { right: 0; left: auto; transform: none; }
 .calendar-tooltip.below { top: calc(100% + 8px); bottom: auto; }
@@ -407,7 +482,7 @@ textarea.form-control { min-height: 82px; resize: vertical; }
 .type-switch button.active { background: var(--card); color: var(--ink); }
 .type-switch button.income-active { color: var(--success); }
 .form-error { margin: -4px 0 12px; color: var(--error); font-size: 12px; line-height: 1.45; }
-.modal-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 20px; background: rgba(37, 38, 33, .34); }
+.modal-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 20px; background: var(--scrim); }
 .modal { width: min(100%, 460px); max-height: min(720px, calc(100vh - 40px)); overflow: auto; padding: 24px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
 .modal.wide { width: min(100%, 560px); }
 .modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 22px; }
@@ -445,7 +520,7 @@ textarea.form-control { min-height: 82px; resize: vertical; }
   .dashboard-grid, .review-grid, .settings-grid { grid-template-columns: 1fr; }
   .summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .calendar-day { min-height: 68px; }
-  .mobile-nav { position: fixed; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); left: 12px; z-index: 5; display: flex; align-items: stretch; justify-content: space-around; padding: 7px 5px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255, 255, 255, .96); backdrop-filter: blur(12px); }
+  .mobile-nav { position: fixed; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); left: 12px; z-index: 5; display: flex; align-items: stretch; justify-content: space-around; padding: 7px 5px; border: 1px solid var(--line); border-radius: 10px; background: var(--mobile-nav-bg); backdrop-filter: blur(12px); }
   .mobile-nav a { display: flex; min-width: 53px; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 3px; padding: 4px 3px; border-radius: 6px; color: var(--muted); font-size: 9px; }
   .mobile-nav a.active { background: var(--orange-soft); color: var(--orange); }
   .ledger-actions { opacity: 1; }

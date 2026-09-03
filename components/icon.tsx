@@ -19,6 +19,8 @@ import {
   Grid2X2,
   HeartPulse,
   House,
+  Monitor,
+  Moon,
   MoreHorizontal,
   Pencil,
   Package,
@@ -34,11 +36,12 @@ import {
   TrendingUp,
   Utensils,
   Upload,
+  Sun,
   WalletCards,
   X,
 } from "lucide-react";
 
-export type IconName = "grid" | "receipt" | "repeat" | "calendar" | "settings" | "plus" | "arrow" | "download" | "upload" | "trash" | "edit" | "check" | "close" | "chevron" | "wallet" | "trend" | "coffee" | "target" | "spark" | "menu" | "income" | "expense" | "dots" | "clock";
+export type IconName = "grid" | "receipt" | "repeat" | "calendar" | "settings" | "plus" | "arrow" | "download" | "upload" | "trash" | "edit" | "check" | "close" | "chevron" | "wallet" | "trend" | "coffee" | "target" | "spark" | "menu" | "income" | "expense" | "dots" | "clock" | "sun" | "moon" | "monitor";
 
 type CategoryType = "EXPENSE" | "INCOME";
 
@@ -67,6 +70,9 @@ const icons: Record<IconName, LucideIcon> = {
   expense: ArrowDownCircle,
   dots: MoreHorizontal,
   clock: Clock3,
+  sun: Sun,
+  moon: Moon,
+  monitor: Monitor,
 };
 
 export function Icon({ name, size = 18, stroke = 1.8 }: { name: IconName; size?: number; stroke?: number }) {

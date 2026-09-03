@@ -5,6 +5,8 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Icon } from "@/components/icon";
+import { ColorModeToggle } from "@/components/color-mode-toggle";
+import { useColorMode } from "@/lib/use-color-mode";
 
 type NavItem = { href: string; label: string; description: string; icon: "grid" | "receipt" | "repeat" | "calendar" | "settings" };
 
@@ -53,6 +55,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const page = titles[pathname] || titles["/dashboard"];
   const [syncState, setSyncState] = useState<"syncing" | "ready" | "error">("syncing");
   const isMobile = useIsMobileViewport();
+  const { mode, setMode: setColorMode, hydrated: themeHydrated } = useColorMode();
 
   useEffect(() => {
     let mounted = true;
@@ -77,6 +80,9 @@ export function AppShell({ children }: { children: ReactNode }) {
         <p className="nav-label secondary-label">工具</p>
         {secondaryItems.map((item) => <NavLink key={item.href} item={item} active={pathname === item.href} />)}
       </nav>
+      <div className="theme-toggle-row">
+        <ColorModeToggle mode={mode} onChange={setColorMode} hydrated={themeHydrated} />
+      </div>
       <div className="sidebar-spacer" />
       <div className="sidebar-note">
         <span className="note-kicker"><Icon name="spark" size={12} /> SMALL HABIT</span>
@@ -94,7 +100,18 @@ export function AppShell({ children }: { children: ReactNode }) {
         <>
           <div className="mobile-topbar">
             <Link href="/dashboard" className="mobile-brand"><span className="brand-mark"><span>月</span></span><strong>月余</strong></Link>
-            <Link href="/transactions?new=1" className="button button-primary button-small"><Icon name="plus" size={15} />记一笔</Link>
+            <div className="mobile-topbar-actions">
+              <button
+                type="button"
+                className="icon-button theme-cycle-button"
+                aria-label={`颜色模式：${mode === "system" ? "跟随系统" : mode === "light" ? "亮色" : "暗色"}（点按切换）`}
+                disabled={!themeHydrated}
+                onClick={() => setColorMode(mode === "system" ? (themeHydrated && document.documentElement.dataset.colorScheme === "dark" ? "light" : "dark") : mode === "light" ? "dark" : "system")}
+              >
+                <Icon name={mode === "system" ? "monitor" : mode === "light" ? "sun" : "moon"} size={16} />
+              </button>
+              <Link href="/transactions?new=1" className="button button-primary button-small"><Icon name="plus" size={15} />记一笔</Link>
+            </div>
           </div>
           <nav className="mobile-nav" aria-label="移动端导航">
             {[...navItems, ...secondaryItems].map((item) => <Link href={item.href} key={item.href} className={pathname === item.href ? "active" : ""}><Icon name={item.icon} size={18} /><span>{item.label}</span></Link>)}
