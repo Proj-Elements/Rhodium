@@ -5,7 +5,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { CategoryIcon, Icon } from "@/components/icon";
 import { MonthSwitcher } from "@/components/month-switcher";
+import { Toast, useFlash } from "@/components/toast";
 import { TransactionForm } from "@/components/transaction-form";
+import { apiFetch, errorMessage } from "@/lib/api-client";
 import { getCategoryColor } from "@/lib/category-colors";
 import { dateLabel, formatMoney, todayInShanghai } from "@/lib/domain";
 import { CategoryDTO, TransactionDTO } from "@/lib/types";
@@ -19,9 +21,7 @@ type DateGroup = {
   incomeCents: number;
 };
 
-function Toast({ message, undo, onUndo }: { message: string; undo?: boolean; onUndo?: () => void }) {
-  return <div className="undo-toast" role="status" aria-live="polite"><span>{message}</span>{undo && onUndo && <button type="button" onClick={onUndo}>撤销</button>}</div>;
-}
+type TransactionsPayload = { month: string; readOnly: boolean; transactions: TransactionDTO[] };
 
 export default function TransactionsPage() {
   const [month, setMonth] = useState(todayInShanghai().slice(0, 7));
@@ -36,29 +36,21 @@ export default function TransactionsPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<TransactionDTO | null>(null);
   const [undoId, setUndoId] = useState<string | null>(null);
-  const [message, setMessage] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const undoTimer = useRef<number | null>(null);
-  const messageTimer = useRef<number | null>(null);
+  const { message, flash } = useFlash();
 
-  function flash(text: string) {
-    if (messageTimer.current) window.clearTimeout(messageTimer.current);
-    setMessage(text);
-    messageTimer.current = window.setTimeout(() => setMessage(""), 2600);
-  }
+  const reload = () => setReloadToken((token) => token + 1);
 
   async function load(signal?: AbortSignal) {
     setLoading(true);
     setError("");
     try {
-      const [transactionResponse, categoryResponse] = await Promise.all([
-        fetch(`/api/transactions?month=${month}&type=${filter === "all" ? "" : filter}`, { signal }),
-        fetch("/api/categories", { signal }),
+      const [transactionResult, categoryResult] = await Promise.all([
+        apiFetch<TransactionsPayload>(`/api/transactions?month=${month}&type=${filter === "all" ? "" : filter}`, { signal }),
+        apiFetch<{ categories: CategoryDTO[] }>("/api/categories", { signal }),
       ]);
-      const transactionResult = await transactionResponse.json().catch(() => ({}));
-      const categoryResult = await categoryResponse.json().catch(() => ({}));
-      if (!transactionResponse.ok) throw new Error(transactionResult.error || "暂时无法读取账目");
-      if (!categoryResponse.ok) throw new Error(categoryResult.error || "暂时无法读取分类");
       setTransactions(transactionResult.transactions || []);
       setReadOnly(Boolean(transactionResult.readOnly));
       if (transactionResult.readOnly) {
@@ -68,19 +60,18 @@ export default function TransactionsPage() {
       setCategories(categoryResult.categories || []);
     } catch (loadError) {
       if (loadError instanceof DOMException && loadError.name === "AbortError") return;
-      setError(loadError instanceof Error ? loadError.message : "暂时无法读取账目");
+      setError(errorMessage(loadError, "暂时无法读取账目"));
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
   }
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month/filter change
   useEffect(() => {
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month/filter change
-  }, [month, filter]);
+  }, [month, filter, reloadToken]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -89,7 +80,6 @@ export default function TransactionsPage() {
     if (params.get("new") === "1") setShowForm(true);
     return () => {
       if (undoTimer.current) window.clearTimeout(undoTimer.current);
-      if (messageTimer.current) window.clearTimeout(messageTimer.current);
     };
   }, []);
 
@@ -98,15 +88,13 @@ export default function TransactionsPage() {
     if (!window.confirm(`删除「${transaction.note || transaction.category.name}」？删除后可以在几秒内撤销。`)) return;
     setDeletingId(transaction.id);
     try {
-      const response = await fetch(`/api/transactions/${transaction.id}`, { method: "DELETE" });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "删除失败");
+      await apiFetch(`/api/transactions/${transaction.id}`, { method: "DELETE" });
       setTransactions((items) => items.filter((item) => item.id !== transaction.id));
       setUndoId(transaction.id);
       if (undoTimer.current) window.clearTimeout(undoTimer.current);
       undoTimer.current = window.setTimeout(() => setUndoId(null), 5000);
     } catch (removeError) {
-      flash(removeError instanceof Error ? removeError.message : "删除失败");
+      flash(errorMessage(removeError, "删除失败"));
     } finally {
       setDeletingId(null);
     }
@@ -117,16 +105,10 @@ export default function TransactionsPage() {
     const restoreId = undoId;
     setUndoId(null);
     try {
-      const response = await fetch(`/api/transactions/${restoreId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ restore: true }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "撤销失败");
-      await load();
+      await apiFetch(`/api/transactions/${restoreId}`, { method: "PATCH", json: { restore: true } });
+      reload();
     } catch (restoreError) {
-      flash(restoreError instanceof Error ? restoreError.message : "撤销失败");
+      flash(errorMessage(restoreError, "撤销失败"));
     }
   }
 
@@ -191,7 +173,7 @@ export default function TransactionsPage() {
     </div>
 
     {readOnly && <div className="readonly-banner"><div><strong>本月已结算，账目暂时只读</strong><span>重新打开本月后，才能添加、编辑或删除记录。</span></div><Link className="button button-secondary button-small" href={`/settlements?month=${month}`}>查看月度回顾 <Icon name="arrow" size={13} /></Link></div>}
-    {loading ? <div className="loading">正在整理账目…</div> : error ? <div className="inline-error"><strong>{error}</strong><button className="button button-secondary button-small" onClick={() => void load()}>再试一次</button></div> : grouped.length === 0 ? <div className="card empty-state"><strong>{transactions.length === 0 ? "这个月还没有记录" : "没有找到匹配的账目"}</strong><span>{transactions.length === 0 ? "记下一笔早餐、交通，或者一笔兼职收入。" : "试试换一个关键词、分类，或清除筛选。"}</span>{transactions.length === 0 && !readOnly && <button type="button" className="button button-primary button-small" onClick={openNew}><Icon name="plus" size={14} />记下第一笔</button>}</div> : grouped.map((group) => <section className="date-group" key={group.date}>
+    {loading ? <div className="loading">正在整理账目…</div> : error ? <div className="inline-error"><strong>{error}</strong><button className="button button-secondary button-small" onClick={reload}>再试一次</button></div> : grouped.length === 0 ? <div className="card empty-state"><strong>{transactions.length === 0 ? "这个月还没有记录" : "没有找到匹配的账目"}</strong><span>{transactions.length === 0 ? "记下一笔早餐、交通，或者一笔兼职收入。" : "试试换一个关键词、分类，或清除筛选。"}</span>{transactions.length === 0 && !readOnly && <button type="button" className="button button-primary button-small" onClick={openNew}><Icon name="plus" size={14} />记下第一笔</button>}</div> : grouped.map((group) => <section className="date-group" key={group.date}>
       <div className="date-group-title"><strong>{dateLabel(group.date)}</strong><span>{group.date}</span><span className="date-group-total">{group.expenseCents > 0 && <span className="expense">支出 {formatMoney(group.expenseCents)}</span>}{group.incomeCents > 0 && <span className="income"> · 收入 {formatMoney(group.incomeCents)}</span>}</span></div>
       <div className="card ledger-card">{group.items.map((transaction) => { const palette = getCategoryColor(transaction.category.id); return <div className="ledger-row" key={transaction.id}>
         <span className={`transaction-symbol${transaction.type === "INCOME" ? " income-symbol" : " expense-symbol"}`} style={transaction.type === "INCOME" ? undefined : { color: palette.color, backgroundColor: palette.surface }}><CategoryIcon categoryName={transaction.category.name} type={transaction.type} size={16} /></span>
@@ -201,7 +183,7 @@ export default function TransactionsPage() {
       </div>; })}</div>
     </section>)}
     {!loading && !error && grouped.length > 0 && <button type="button" className="button button-primary" onClick={openNew} disabled={readOnly}><Icon name="plus" size={16} />{readOnly ? "本月已锁定" : "添加一笔"}</button>}
-    {(showForm || editing) && !readOnly && <TransactionForm categories={categories} transaction={editing} defaultDate={defaultEntryDate} onClose={() => { setShowForm(false); setEditing(null); }} onSaved={() => { setShowForm(false); setEditing(null); void load(); }} />}
-    <div className="toast-stack">{undoId && <Toast message="记录已删除" undo onUndo={() => void undo()} />}{message && <Toast message={message} />}</div>
+    {(showForm || editing) && !readOnly && <TransactionForm categories={categories} transaction={editing} defaultDate={defaultEntryDate} onClose={() => { setShowForm(false); setEditing(null); }} onSaved={() => { setShowForm(false); setEditing(null); reload(); }} />}
+    <div className="toast-stack">{undoId && <Toast message="记录已删除" action="撤销" onAction={() => void undo()} />}{message && <Toast message={message} />}</div>
   </AppShell>;
 }

@@ -3,43 +3,37 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Icon } from "@/components/icon";
+import { Toast, useFlash } from "@/components/toast";
+import { apiFetch, errorMessage } from "@/lib/api-client";
 import { parseCsv } from "@/lib/csv";
 import { CategoryDTO } from "@/lib/types";
 
 type ImportPreview = { total: number; valid: number; errors: string[]; preview?: { index: number; date: string; amount: unknown; note: unknown }[] };
-
-
-function Toast({ message }: { message: string }) {
-  return <div className="undo-toast" role="status" aria-live="polite">{message}</div>;
-}
 
 export default function SettingsPage() {
   const [categories, setCategories] = useState<CategoryDTO[]>([]);
   const [newCategory, setNewCategory] = useState("");
   const [categoryType, setCategoryType] = useState("expense");
   const [entryDateMode, setEntryDateMode] = useState("today");
-  const [message, setMessage] = useState("");
   const [importRows, setImportRows] = useState<Record<string, unknown>[] | null>(null);
   const [backupPayload, setBackupPayload] = useState<Record<string, unknown> | undefined>(undefined);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [importing, setImporting] = useState(false);
   const [loading, setLoading] = useState(true);
+  const { message, flash } = useFlash();
 
   async function load() {
     setLoading(true);
     try {
-      const response = await fetch("/api/categories");
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "无法读取分类");
+      const result = await apiFetch<{ categories: CategoryDTO[] }>("/api/categories");
       setCategories(result.categories || []);
     } catch (loadError) {
-      showMessage(loadError instanceof Error ? loadError.message : "无法读取分类");
+      flash(errorMessage(loadError, "无法读取分类"));
     } finally {
       setLoading(false);
     }
   }
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
   useEffect(() => {
     void load();
     const saved = window.localStorage.getItem("yueyu-entry-date-mode");
@@ -47,45 +41,36 @@ export default function SettingsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
   }, []);
 
-  function showMessage(text: string) {
-    setMessage(text);
-    window.setTimeout(() => setMessage(""), 2600);
-  }
-
   async function addCategory(event: FormEvent) {
     event.preventDefault();
     if (!newCategory.trim()) {
-      showMessage("先输入分类名称");
+      flash("先输入分类名称");
       return;
     }
     try {
-      const response = await fetch("/api/categories", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: newCategory, type: categoryType }) });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "添加分类失败");
+      await apiFetch("/api/categories", { method: "POST", json: { name: newCategory, type: categoryType } });
       setNewCategory("");
-      showMessage("分类已添加");
+      flash("分类已添加");
       await load();
     } catch (addError) {
-      showMessage(addError instanceof Error ? addError.message : "添加分类失败");
+      flash(errorMessage(addError, "添加分类失败"));
     }
   }
 
   async function archiveCategory(category: CategoryDTO) {
     try {
-      const response = await fetch(`/api/categories/${category.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ archived: !category.archivedAt }) });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "分类更新失败");
-      showMessage(category.archivedAt ? "分类已重新启用" : "分类已停用");
+      await apiFetch(`/api/categories/${category.id}`, { method: "PATCH", json: { archived: !category.archivedAt } });
+      flash(category.archivedAt ? "分类已重新启用" : "分类已停用");
       await load();
     } catch (archiveError) {
-      showMessage(archiveError instanceof Error ? archiveError.message : "分类更新失败");
+      flash(errorMessage(archiveError, "分类更新失败"));
     }
   }
 
   function changeDateMode(value: string) {
     setEntryDateMode(value);
     window.localStorage.setItem("yueyu-entry-date-mode", value);
-    showMessage("默认日期设置已保存");
+    flash("默认日期设置已保存");
   }
 
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {
@@ -105,14 +90,12 @@ export default function SettingsPage() {
       }
       if (!rows.length) throw new Error("文件中没有可导入的账目");
       const format = file.name.toLowerCase().endsWith(".json") ? "json" : "csv";
-      const response = await fetch("/api/import/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ format, rows }) });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "无法检查导入文件");
+      const result = await apiFetch<ImportPreview>("/api/import/preview", { method: "POST", json: { format, rows } });
       setImportRows(rows);
       setBackupPayload(backup);
       setPreview(result);
     } catch (fileError) {
-      showMessage(fileError instanceof Error ? fileError.message : "无法读取这个文件，请检查格式");
+      flash(errorMessage(fileError, "无法读取这个文件，请检查格式"));
     }
     event.target.value = "";
   }
@@ -127,13 +110,11 @@ export default function SettingsPage() {
     if (!importRows || !preview || preview.errors.length) return;
     setImporting(true);
     try {
-      const response = await fetch("/api/import", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ format: "json", rows: importRows, backup: backupPayload }) });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "导入失败");
+      const result = await apiFetch<{ imported: number }>("/api/import", { method: "POST", json: { format: "json", rows: importRows, backup: backupPayload } });
       cancelImport();
-      showMessage(`已导入 ${result.imported} 条记录`);
+      flash(`已导入 ${result.imported} 条记录`);
     } catch (importError) {
-      showMessage(importError instanceof Error ? importError.message : "导入失败");
+      flash(errorMessage(importError, "导入失败"));
     } finally {
       setImporting(false);
     }

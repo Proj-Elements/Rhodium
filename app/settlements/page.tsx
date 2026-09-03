@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Icon } from "@/components/icon";
 import { MonthSwitcher } from "@/components/month-switcher";
+import { Toast, useFlash } from "@/components/toast";
+import { apiFetch, errorMessage } from "@/lib/api-client";
 import { formatMoney, monthStart, todayInShanghai } from "@/lib/domain";
 
 type Summary = {
@@ -36,10 +38,6 @@ function shortMonth(month: string) {
 function getStatus(month: string): Status {
   const current = todayInShanghai().slice(0, 7);
   return month < current ? "past" : month > current ? "future" : "current";
-}
-
-function Toast({ message }: { message: string }) {
-  return <div className="undo-toast" role="status" aria-live="polite">{message}</div>;
 }
 
 function formatCalendarMoney(cents: number) {
@@ -82,54 +80,47 @@ export default function SettlementsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
+  const [reloadToken, setReloadToken] = useState(0);
+  const { message, flash } = useFlash();
   const status = getStatus(month);
 
-  async function load() {
-    setLoading(true);
-    setError("");
-    try {
-      const [currentResponse, trendResponse] = await Promise.all([
-        fetch(`/api/settlements/${month}`),
-        fetch(`/api/settlements?end=${month}`),
-      ]);
-      const current = await currentResponse.json().catch(() => ({}));
-      const trendResult = await trendResponse.json().catch(() => ({}));
-      if (!currentResponse.ok) throw new Error(current.error || "暂时无法读取本月回顾");
-      if (!trendResponse.ok) throw new Error(trendResult.error || "暂时无法读取历史趋势");
-      setSummary(current.summary);
-      setTrend(trendResult.summaries || []);
-    } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "暂时无法读取月度回顾");
-    } finally {
-      setLoading(false);
-    }
-  }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month change
+  const reload = () => setReloadToken((token) => token + 1);
+
   useEffect(() => {
+    const controller = new AbortController();
+    async function load() {
+      setLoading(true);
+      setError("");
+      try {
+        // include=focus folds the current month summary into the trend request
+        // (previously two overlapping requests fetched the same month twice).
+        const result = await apiFetch<{ summaries: Summary[]; focus: Summary | null }>(`/api/settlements?end=${month}&include=focus`, { signal: controller.signal });
+        setSummary(result.focus ?? result.summaries.find((item) => item.month === month) ?? null);
+        setTrend(result.summaries || []);
+      } catch (loadError) {
+        if (loadError instanceof DOMException && loadError.name === "AbortError") return;
+        setError(errorMessage(loadError, "暂时无法读取月度回顾"));
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    }
     const requestedMonth = new URLSearchParams(window.location.search).get("month");
     if (requestedMonth && /^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth)) setMonth(requestedMonth);
     void load();
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month change
-  }, [month]);
-
-  function flash(text: string) {
-    setMessage(text);
-    window.setTimeout(() => setMessage(""), 2600);
-  }
+  }, [month, reloadToken]);
 
   async function settle() {
     if (status === "future" || busy) return;
     if (!window.confirm(`确认结算${monthLabel(month)}吗？结算后该月账目会暂时变为只读。`)) return;
     setBusy(true);
     try {
-      const response = await fetch(`/api/settlements/${month}/settle`, { method: "POST" });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "结算失败，请稍后重试");
+      await apiFetch(`/api/settlements/${month}/settle`, { method: "POST" });
       flash("本月已结算");
-      await load();
+      reload();
     } catch (settleError) {
-      flash(settleError instanceof Error ? settleError.message : "结算失败，请稍后重试");
+      flash(errorMessage(settleError, "结算失败，请稍后重试"));
     } finally {
       setBusy(false);
     }
@@ -139,13 +130,11 @@ export default function SettlementsPage() {
     if (busy) return;
     setBusy(true);
     try {
-      const response = await fetch(`/api/settlements/${month}/reopen`, { method: "POST" });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "重新打开失败，请稍后重试");
+      await apiFetch(`/api/settlements/${month}/reopen`, { method: "POST" });
       flash("本月已重新打开");
-      await load();
+      reload();
     } catch (reopenError) {
-      flash(reopenError instanceof Error ? reopenError.message : "重新打开失败，请稍后重试");
+      flash(errorMessage(reopenError, "重新打开失败，请稍后重试"));
     } finally {
       setBusy(false);
     }
@@ -161,7 +150,7 @@ export default function SettlementsPage() {
 
   return <AppShell>
     <div className="toolbar"><span className="toolbar-note"><Icon name="calendar" size={14} /><span>{status === "current" ? "正在查看本月" : status === "past" ? "历史账本" : "提前看看未来"}</span></span><MonthSwitcher month={month} onChange={setMonth} /></div>
-    {loading ? <div className="loading">正在计算本月结算…</div> : error ? <div className="inline-error"><strong>{error}</strong><button type="button" className="button button-secondary button-small" onClick={() => void load()}>再试一次</button></div> : !summary ? <div className="inline-error">暂时没有可显示的月度回顾。</div> : <>
+    {loading ? <div className="loading">正在计算本月结算…</div> : error ? <div className="inline-error"><strong>{error}</strong><button type="button" className="button button-secondary button-small" onClick={reload}>再试一次</button></div> : !summary ? <div className="inline-error">暂时没有可显示的月度回顾。</div> : <>
       <div className="summary-head"><div><h2>{monthLabel(month)}</h2><span className="summary-status"><i className={`status-dot ${settled ? "done" : status === "future" ? "pending" : ""}`} />{statusText}</span>{settledAt && <p className="summary-date">快照保存于 {settledAt}</p>}</div><div>{status === "future" ? <button type="button" className="button button-secondary" disabled>未来月份不可结算</button> : settled ? <button type="button" className="button button-secondary" onClick={() => void reopen()} disabled={busy}>重新打开</button> : <button type="button" className="button button-primary" onClick={() => void settle()} disabled={busy}><Icon name="check" size={16} />完成结算</button>}</div></div>
       <div className="summary-grid"><div className="card summary-stat"><p className="card-label">MONTHLY BUDGET</p><strong>{summary.budgetCents === null ? "尚未设置" : formatMoney(summary.budgetCents)}</strong><span>本月计划边界</span></div><div className="card summary-stat"><p className="card-label">SPENT</p><strong className="expense">{formatMoney(summary.expenseCents)}</strong><span>{summary.transactionCount} 笔支出</span></div><div className="card summary-stat"><p className="card-label">REMAINING</p><strong className={summary.remainingCents !== null && summary.remainingCents < 0 ? "negative" : summary.remainingCents !== null ? "income" : ""}>{summary.remainingCents === null ? "—" : formatMoney(summary.remainingCents)}</strong><span>收入另计 {formatMoney(summary.incomeCents)}</span></div><div className="card summary-stat"><p className="card-label">NET FLOW</p><strong className={netCents < 0 ? "negative" : "income"}>{netCents >= 0 ? "+" : "−"}{formatMoney(Math.abs(netCents))}</strong><span>收入减去本月支出</span></div></div>
       <section className="card calendar-card"><div className="section-heading"><div><h3>每天花了多少</h3><p>移到日期上查看当天的支出、收入和记录笔数。</p></div><div className="calendar-legend"><span><i className="expense" />支出</span><span><i className="income" />收入</span></div></div><DailyCalendar month={month} days={summary.dailyBreakdown} /></section>
