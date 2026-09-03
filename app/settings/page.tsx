@@ -3,30 +3,11 @@
 import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Icon } from "@/components/icon";
+import { parseCsv } from "@/lib/csv";
 import { CategoryDTO } from "@/lib/types";
 
 type ImportPreview = { total: number; valid: number; errors: string[]; preview?: { index: number; date: string; amount: unknown; note: unknown }[] };
 
-function parseCsv(text: string) {
-  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter((line) => line.trim());
-  if (lines.length < 2) return [];
-  const parseLine = (line: string) => {
-    const values: string[] = [];
-    let current = "";
-    let quoted = false;
-    for (let index = 0; index < line.length; index += 1) {
-      const char = line[index];
-      if (char === '"' && line[index + 1] === '"') { current += '"'; index += 1; continue; }
-      if (char === '"') { quoted = !quoted; continue; }
-      if (char === "," && !quoted) { values.push(current); current = ""; continue; }
-      current += char;
-    }
-    values.push(current);
-    return values;
-  };
-  const headers = parseLine(lines[0]);
-  return lines.slice(1).map((line) => Object.fromEntries(parseLine(line).map((item, index) => [headers[index], item])));
-}
 
 function Toast({ message }: { message: string }) {
   return <div className="undo-toast" role="status" aria-live="polite">{message}</div>;
