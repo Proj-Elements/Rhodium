@@ -34,7 +34,8 @@ export function parseAmountToCents(input: unknown, label = "金额"): number {
 
 /** Integer-cents parser for backup payloads (amountCents fields). */
 export function parseCents(input: unknown, label: string): number {
-  const numeric = typeof input === "number" ? input : Number(String(input ?? "").replace(/,/g, "").trim());
+  if (input === null || input === undefined || input === "") throw new Error(`${label}不能为空`);
+  const numeric = typeof input === "number" ? input : Number(String(input).replace(/,/g, "").trim());
   if (!Number.isInteger(numeric) || numeric < 0 || numeric > 2_000_000_000) throw new Error(`${label}格式不正确`);
   return numeric;
 }
