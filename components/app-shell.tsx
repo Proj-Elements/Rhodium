@@ -84,11 +84,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="theme-toggle-row">
         <ColorModeToggle mode={mode} onChange={setColorMode} hydrated={themeHydrated} />
       </div>
-      <div className="sidebar-note">
-        <span className="note-kicker"><Icon name="spark" size={12} /> SMALL HABIT</span>
-        <p>记下一杯饮料，<br />也记住自己的节奏。</p>
-        <Link href="/transactions?new=1" className="text-link">现在记一笔 <Icon name="arrow" size={14} /></Link>
-      </div>
       <div className="sync-status"><span className={`sync-dot ${syncState}`} />{syncLabel}</div>
       <div className="sidebar-footer">CNY · ASIA/SHANGHAI</div>
     </aside>

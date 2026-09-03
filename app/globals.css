@@ -180,9 +180,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .nav-copy small { color: var(--muted); font-size: 10px; line-height: 1.25; }
 .nav-dot { width: 5px; height: 5px; flex: 0 0 auto; border-radius: 50%; background: var(--orange); }
 .sidebar-spacer { min-height: 28px; flex: 1; }
-.sidebar-note { padding: 17px 16px 16px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
-.sidebar-note .note-kicker { display: inline-flex; align-items: center; gap: 6px; margin: 0; color: var(--muted); font-size: 9px; letter-spacing: .7px; }
-.sidebar-note p { margin: 12px 0 17px; font-size: 13px; line-height: 1.65; }
 .text-link { display: inline-flex; align-items: center; gap: 5px; color: var(--orange); font-size: 12px; font-weight: 650; transition: color .16s ease; }
 .text-link:hover { color: var(--orange-dark); }
 .sync-status { display: flex; align-items: center; gap: 7px; margin: 16px 10px 0; color: var(--muted); font-size: 10px; }
