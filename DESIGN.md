@@ -331,7 +331,7 @@ The brand's strongest visual signature is the **AI-timeline pill palette**: five
 - **Done** (`{colors.timeline-done}` — #c08532): Warm gold.
 
 ### Semantic
-- **Success** (`{colors.semantic-success}` — #1f8a65): Confirmation indicators.
+- **Success** (`{colors.semantic-success}` — #1f8a65): Confirmation indicators, and income/surplus amounts (red-up-green-down is reserved for CN market conventions, not ledger semantics).
 - **Error** (`{colors.semantic-error}` — #cf2d56): Validation errors.
 
 ## Typography
