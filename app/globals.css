@@ -35,6 +35,7 @@
   --cat-peach-surface: #fbefea;
   --on-primary: #ffffff;
   /* Inverse-surface accents (text on the dark balance card / ink toast) */
+  --on-ink-primary: var(--canvas);
   --on-ink-muted: #b9b8b0;
   --on-ink-soft: #f2a4b7;
   --on-ink-accent: #ffb28f;
@@ -105,9 +106,11 @@
   --ink-card-bg: #232320;
   --ink-card-border: #3d3d37;
   --ink-card-track: #3d3d37;
-  --on-ink-muted: #7a786e;
-  --on-ink-soft: #b03a52;
-  --on-ink-accent: #c2570f;
+  /* Text on that dark surface stays light in dark mode. */
+  --on-ink-primary: #f4f2ea;
+  --on-ink-muted: #a3a199;
+  --on-ink-soft: #f2a4b7;
+  --on-ink-accent: #ffb28f;
   --prompt-warm-border: #4a3a2c;
   --prompt-warm-bg: #2b241c;
   --prompt-warn-border: #54303b;
@@ -121,6 +124,10 @@
   --segmented-track: #2b2b27;
   --track-neutral: #3d3d37;
   --hover-strong: #6f6d63;
+  --toast-inverse-bg: #2b2b27;
+  --toast-inverse-fg: #f4f2ea;
+  --toast-inverse-border: #3d3d37;
+  --toast-inverse-accent: #ffb28f;
   --shadow-soft: 0 5px 16px rgba(0, 0, 0, .5);
   --scrim: rgba(0, 0, 0, .55);
   --mobile-nav-bg: rgba(28, 28, 25, .96);
@@ -129,6 +136,12 @@
 
 :root:not([data-color-scheme="dark"]) {
   color-scheme: light;
+  /* Dark surfaces that stay dark in both schemes, with scheme-specific
+     foregrounds (the old values assumed a light page behind them). */
+  --toast-inverse-bg: #26251e;
+  --toast-inverse-fg: #f7f7f4;
+  --toast-inverse-border: #4d4d45;
+  --toast-inverse-accent: #ffb28f;
   --shadow-soft: 0 5px 16px rgba(38, 37, 30, .11);
   --scrim: rgba(37, 38, 33, .34);
   --mobile-nav-bg: rgba(255, 255, 255, .96);
@@ -237,14 +250,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 
 /* Dashboard */
 .dashboard-top { display: grid; grid-template-columns: minmax(280px, 1.35fr) repeat(3, minmax(150px, .76fr)); gap: 12px; }
-.balance-card { position: relative; display: flex; min-height: 184px; flex-direction: column; justify-content: space-between; padding: 24px; overflow: hidden; border-radius: 8px; background: var(--ink); color: var(--canvas); }
-:root[data-color-scheme="dark"] .balance-card { border: 1px solid var(--ink-card-border, var(--ink-border)); background: var(--ink-card-bg, var(--ink)); color: var(--canvas); }
+.balance-card { position: relative; display: flex; min-height: 184px; flex-direction: column; justify-content: space-between; padding: 24px; overflow: hidden; border-radius: 8px; background: var(--ink); color: var(--on-ink-primary); }
+:root[data-color-scheme="dark"] .balance-card { border: 1px solid var(--ink-card-border, var(--ink-border)); background: var(--ink-card-bg, var(--ink)); color: var(--on-ink-primary); }
 .balance-card::after { position: absolute; right: 24px; top: 25px; width: 7px; height: 7px; border-radius: 50%; background: var(--orange); content: ""; }
 .balance-card .card-label { color: var(--on-ink-muted); }
 .balance-card h2 { margin: 4px 0 0; font-family: var(--mono); font-size: 40px; font-weight: 400; letter-spacing: 0; line-height: 1.1; }
 .balance-card h2.negative { color: var(--on-ink-soft); }
 .balance-card-meta { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; margin-top: 22px; color: var(--on-ink-muted); font-size: 12px; }
-.balance-card-meta strong { display: block; margin-top: 2px; color: var(--canvas); font-family: var(--mono); font-size: 12px; font-weight: 400; }
+.balance-card-meta strong { display: block; margin-top: 2px; color: var(--on-ink-primary); font-family: var(--mono); font-size: 12px; font-weight: 400; }
 .balance-percent { color: var(--on-ink-accent); font-family: var(--mono); font-size: 12px; }
 .progress-track { height: 5px; margin-top: 9px; overflow: hidden; border-radius: 99px; background: var(--ink-track); }
 :root[data-color-scheme="dark"] .progress-track { background: var(--ink-card-track, var(--ink-track)); }
@@ -523,8 +536,8 @@ textarea.form-control { min-height: 82px; resize: vertical; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .inline-error { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 17px; border: 1px solid var(--error-banner-border); border-radius: 7px; background: var(--error-soft); color: var(--error); font-size: 12px; }
 .toast-stack { position: fixed; right: 24px; bottom: 24px; z-index: 20; display: flex; flex-direction: column; align-items: flex-end; gap: 7px; }
-.undo-toast { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1px solid var(--ink-border); border-radius: 6px; background: var(--ink); color: var(--canvas); font-size: 12px; }
-.undo-toast button { padding: 0; border: 0; background: transparent; color: var(--on-ink-accent); font-size: 12px; font-weight: 650; }
+.undo-toast { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1px solid var(--toast-inverse-border); border-radius: 6px; background: var(--toast-inverse-bg); color: var(--toast-inverse-fg); font-size: 12px; }
+.undo-toast button { padding: 0; border: 0; background: transparent; color: var(--toast-inverse-accent); font-size: 12px; font-weight: 650; }
 
 @media (max-width: 1150px) {
   .main-content { padding-right: 34px; padding-left: 34px; }
