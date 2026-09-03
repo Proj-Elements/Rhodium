@@ -1,0 +1,19 @@
+node_modules
+.next
+out
+.env
+.env.local
+coverage
+*.log
+
+# OS / editor junk
+.DS_Store
+
+# Build artifacts
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+next-env.d.ts
+
+# Local agent tool configs
+.claude/
+.freebuff/

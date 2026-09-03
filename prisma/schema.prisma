@@ -1,0 +1,100 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TransactionType {
+  EXPENSE
+  INCOME
+}
+
+enum TransactionSource {
+  MANUAL
+  SUBSCRIPTION
+}
+
+enum CategoryType {
+  EXPENSE
+  INCOME
+  BOTH
+}
+
+model Category {
+  id            String         @id @default(cuid())
+  name          String
+  type          CategoryType   @default(EXPENSE)
+  isSystem      Boolean        @default(false)
+  sortOrder     Int            @default(0)
+  archivedAt    DateTime?
+  transactions  Transaction[]
+  subscriptions Subscription[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@unique([name, type])
+  @@index([archivedAt, sortOrder])
+}
+
+model Transaction {
+  id                        String            @id @default(cuid())
+  type                      TransactionType
+  amountCents               Int
+  occurredOn                DateTime          @db.Date
+  categoryId                String
+  category                  Category          @relation(fields: [categoryId], references: [id])
+  note                      String?
+  source                    TransactionSource @default(MANUAL)
+  subscriptionId            String?
+  subscriptionMonth         DateTime?         @db.Date
+  subscriptionOccurrenceKey String?           @unique
+  subscription              Subscription?     @relation(fields: [subscriptionId], references: [id])
+  deletedAt                 DateTime?
+  createdAt                 DateTime          @default(now())
+  updatedAt                 DateTime          @updatedAt
+
+  @@index([occurredOn, deletedAt])
+  @@index([categoryId, occurredOn])
+}
+
+model Subscription {
+  id           String        @id @default(cuid())
+  name         String
+  amountCents  Int
+  billingDay   Int
+  categoryId   String
+  category     Category      @relation(fields: [categoryId], references: [id])
+  startMonth   DateTime      @db.Date
+  endMonth     DateTime?     @db.Date
+  active       Boolean       @default(true)
+  note         String?
+  transactions Transaction[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@index([active, startMonth, endMonth])
+}
+
+model MonthlyBudget {
+  id          String   @id @default(cuid())
+  month       DateTime @unique @db.Date
+  amountCents Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model MonthlySettlement {
+  id                   String    @id @default(cuid())
+  month                DateTime  @unique @db.Date
+  budgetAmountCents    Int
+  expenseAmountCents   Int
+  incomeAmountCents    Int
+  remainingAmountCents Int?
+  settledAt            DateTime  @default(now())
+  reopenedAt           DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+}

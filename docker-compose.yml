@@ -1,0 +1,38 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: yueyu
+      POSTGRES_PASSWORD: yueyu_password
+      POSTGRES_DB: yueyu
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - yueyu-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U yueyu -d yueyu"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://yueyu:yueyu_password@db:5432/yueyu?schema=public
+      NEXT_PUBLIC_APP_NAME: 月余
+      PORT: 3030
+      HOSTNAME: 0.0.0.0
+      TZ: Asia/Shanghai
+    ports:
+      - "3030:3030"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  yueyu-postgres:
