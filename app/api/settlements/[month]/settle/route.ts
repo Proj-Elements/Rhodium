@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { handleApiError, jsonError } from "@/lib/api";
 import { monthStart, parseMonth, todayInShanghai } from "@/lib/domain";
-import { conflict } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { getMonthSummary } from "@/lib/summary";
 import { syncSubscriptions } from "@/lib/subscriptions";

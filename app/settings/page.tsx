@@ -39,10 +39,12 @@ export default function SettingsPage() {
     }
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
   useEffect(() => {
     void load();
     const saved = window.localStorage.getItem("yueyu-entry-date-mode");
     if (saved === "last" || saved === "today") setEntryDateMode(saved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount
   }, []);
 
   function showMessage(text: string) {

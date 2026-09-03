@@ -74,10 +74,12 @@ export default function TransactionsPage() {
     }
   }
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month/filter change
   useEffect(() => {
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month/filter change
   }, [month, filter]);
 
   useEffect(() => {

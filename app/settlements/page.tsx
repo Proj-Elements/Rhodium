@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Icon } from "@/components/icon";
 import { MonthSwitcher } from "@/components/month-switcher";
-import { addMonths, formatMoney, monthStart, todayInShanghai } from "@/lib/domain";
+import { formatMoney, monthStart, todayInShanghai } from "@/lib/domain";
 
 type Summary = {
   month: string;
@@ -105,10 +105,12 @@ export default function SettlementsPage() {
       setLoading(false);
     }
   }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month change
   useEffect(() => {
     const requestedMonth = new URLSearchParams(window.location.search).get("month");
     if (requestedMonth && /^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth)) setMonth(requestedMonth);
     void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month change
   }, [month]);
 
   function flash(text: string) {
