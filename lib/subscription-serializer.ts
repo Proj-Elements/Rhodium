@@ -1,4 +1,5 @@
-import type { CategoryDTO, SubscriptionDTO } from "@/lib/types";
+import type { SubscriptionDTO } from "@/lib/types";
+import { serializeCategory } from "@/lib/serializers";
 
 const subscriptionInclude = { category: true } as const;
 
@@ -30,22 +31,11 @@ export function serializeSubscription(subscription: SubscriptionWithCategory): S
     amountCents: subscription.amountCents,
     billingDay: subscription.billingDay,
     categoryId: subscription.categoryId,
-    category: serializeCategoryModel(subscription.category),
+    category: serializeCategory(subscription.category),
     startMonth: subscription.startMonth.toISOString().slice(0, 7),
     endMonth: subscription.endMonth ? subscription.endMonth.toISOString().slice(0, 7) : null,
     active: subscription.active,
     note: subscription.note,
-  };
-}
-
-function serializeCategoryModel(category: SubscriptionWithCategory["category"]): CategoryDTO {
-  return {
-    id: category.id,
-    name: category.name,
-    type: category.type,
-    isSystem: category.isSystem,
-    sortOrder: category.sortOrder,
-    archivedAt: category.archivedAt ? category.archivedAt.toISOString().slice(0, 10) : null,
   };
 }
 

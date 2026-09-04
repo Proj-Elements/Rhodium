@@ -7,6 +7,16 @@ type TransactionWithRelations = Transaction & {
   subscription: { name: string } | null;
 };
 
+/** Structural shape of the category fields the DTO needs (Prisma row or a narrowed select). */
+export type CategoryLike = {
+  id: string;
+  name: string;
+  type: Category["type"];
+  isSystem: boolean;
+  sortOrder: number;
+  archivedAt: Date | null;
+};
+
 /**
  * Whitelist a Prisma Transaction into the client-facing TransactionDTO.
  * Deliberately excludes internal fields (deletedAt, subscriptionOccurrenceKey,
@@ -27,15 +37,19 @@ export function serializeTransaction(transaction: TransactionWithRelations): Tra
   };
 }
 
-/** Whitelist a Prisma Category into the client-facing CategoryDTO. */
-export function serializeCategory(category: Category): CategoryDTO {
+/**
+ * Whitelist a Prisma Category into the client-facing CategoryDTO.
+ * `archivedAt` is an absolute timestamp, so it is serialized in full instead of
+ * being truncated to a UTC date (which shifted the day for Shanghai users).
+ */
+export function serializeCategory(category: CategoryLike): CategoryDTO {
   return {
     id: category.id,
     name: category.name,
     type: category.type,
     isSystem: category.isSystem,
     sortOrder: category.sortOrder,
-    archivedAt: category.archivedAt ? dateOnlyKey(category.archivedAt) : null,
+    archivedAt: category.archivedAt ? category.archivedAt.toISOString() : null,
   };
 }
 

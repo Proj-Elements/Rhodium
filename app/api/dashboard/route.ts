@@ -6,7 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { ensureDefaultCategories } from "@/lib/seed";
 import { serializeTransaction } from "@/lib/serializers";
 import { syncSubscriptions } from "@/lib/subscriptions";
-import { getBudgetPreset, hasExplicitBudget } from "@/lib/budget";
+import { resolveBudget } from "@/lib/budget";
 
 export const dynamic = "force-dynamic";
 
@@ -18,21 +18,20 @@ export async function GET(request: Request) {
     await ensureDefaultCategories();
     await syncSubscriptions();
 
-    const { start, nextStart } = monthRange(month);
+    const { start, end, nextStart } = monthRange(month);
     const today = todayInShanghai();
     const currentMonth = today.slice(0, 7);
     const todayDate = new Date(`${today}T00:00:00.000Z`);
     const monthStatus: "past" | "current" | "future" = month < currentMonth ? "past" : month > currentMonth ? "future" : "current";
-    const focusDate = monthStatus === "current" ? todayDate : monthStatus === "past" ? monthRange(month).end : start;
+    const focusDate = monthStatus === "current" ? todayDate : monthStatus === "past" ? end : start;
     const recentStart = new Date(focusDate);
     recentStart.setUTCDate(recentStart.getUTCDate() - 6);
     const chartStart = month === currentMonth || recentStart >= start ? recentStart : start;
     const chartDayCount = Math.floor((focusDate.getTime() - chartStart.getTime()) / 86_400_000) + 1;
 
     const monthTxWhere = { deletedAt: null as null, occurredOn: { gte: start, lt: nextStart } };
-    const [preset, hasExplicit, expense, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups] = await Promise.all([
-      getBudgetPreset(),
-      hasExplicitBudget(month),
+    const [budget, expense, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups, categories] = await Promise.all([
+      resolveBudget(month),
       prisma.transaction.aggregate({
         where: { ...monthTxWhere, type: TransactionType.EXPENSE },
         _sum: { amountCents: true },
@@ -71,10 +70,11 @@ export async function GET(request: Request) {
         where: { type: TransactionType.INCOME, deletedAt: null, occurredOn: { gte: chartStart, lte: focusDate } },
         _sum: { amountCents: true },
       }),
+      // Categories are a tiny table; loading them here avoids a second
+      // sequential round trip once the expense grouping is known.
+      prisma.category.findMany({ select: { id: true, name: true } }),
     ]);
 
-    const categoryIds = grouped.map((item) => item.categoryId);
-    const categories = await prisma.category.findMany({ where: { id: { in: categoryIds } } });
     const categoryMap = new Map(categories.map((category) => [category.id, category.name]));
 
     const expenseByDate = new Map(recentExpenseGroups.map((item) => [dateOnlyKey(item.occurredOn), item._sum.amountCents ?? 0]));
@@ -89,14 +89,13 @@ export async function GET(request: Request) {
     const focusDateExpenseCents = focusGroups.find((group) => group.type === TransactionType.EXPENSE)?._sum.amountCents ?? 0;
     const focusDateIncomeCents = focusGroups.find((group) => group.type === TransactionType.INCOME)?._sum.amountCents ?? 0;
     const expenseCents = expense._sum.amountCents ?? 0;
-    // Effective budget = explicit month row, falling back to the preset.
-    const budgetCents = hasExplicit ? await prisma.monthlyBudget.findUnique({ where: { month: start }, select: { amountCents: true } }).then((row) => row?.amountCents ?? null) : preset;
+    const budgetCents = budget.amountCents;
     return NextResponse.json({
       month,
       today,
       focusDate: dateOnlyKey(focusDate),
       budget: budgetCents === null ? null : { amountCents: budgetCents },
-      budgetSource: budgetCents === null ? "none" : hasExplicit ? "month" : "preset",
+      budgetSource: budget.source,
       expenseCents,
       incomeCents: income._sum.amountCents ?? 0,
       remainingCents: calculateRemaining(budgetCents, expenseCents),

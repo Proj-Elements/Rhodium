@@ -11,24 +11,25 @@ export async function setBudgetPreset(amountCents: number): Promise<void> {
   await prisma.budgetPreset.upsert({ where: { id: 1 }, create: { id: 1, amountCents }, update: { amountCents } });
 }
 
+export type BudgetSource = "month" | "preset" | "none";
+
 /**
- * Budget for a month = the explicit MonthlyBudget row if one exists,
- * otherwise the preset. Returns null when neither is set.
+ * Single source of truth for "what is this month's budget":
+ * the explicit MonthlyBudget row if one exists, otherwise the preset.
+ * Both rows are fetched in one round trip; callers that also need to know
+ * where the number came from read `source`.
  */
-export async function resolveBudgetCents(month: string): Promise<number | null> {
-  const budget = await prisma.monthlyBudget.findUnique({
-    where: { month: monthStart(month) },
-    select: { amountCents: true },
-  });
-  if (budget) return budget.amountCents;
-  return getBudgetPreset();
+export async function resolveBudget(month: string): Promise<{ amountCents: number | null; source: BudgetSource }> {
+  const [budget, preset] = await Promise.all([
+    prisma.monthlyBudget.findUnique({ where: { month: monthStart(month) }, select: { amountCents: true } }),
+    getBudgetPreset(),
+  ]);
+  if (budget) return { amountCents: budget.amountCents, source: "month" };
+  if (preset !== null) return { amountCents: preset, source: "preset" };
+  return { amountCents: null, source: "none" };
 }
 
-/** True when this specific month carries its own explicit budget row. */
-export async function hasExplicitBudget(month: string): Promise<boolean> {
-  const budget = await prisma.monthlyBudget.findUnique({
-    where: { month: monthStart(month) },
-    select: { id: true },
-  });
-  return Boolean(budget);
+/** Effective budget in cents, or null when neither a month row nor a preset is set. */
+export async function resolveBudgetCents(month: string): Promise<number | null> {
+  return (await resolveBudget(month)).amountCents;
 }

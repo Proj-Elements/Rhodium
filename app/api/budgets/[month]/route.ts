@@ -51,15 +51,21 @@ export async function PUT(request: Request, { params }: Context) {
 
     if (scope === "future") {
       // Write explicit rows for this month and the following ones so the
-      // preset no longer applies to them.
+      // preset no longer applies to them. Both statements run in one
+      // transaction and cover exactly the same window, so a mid-way failure
+      // cannot leave half of the range on the old amount.
       const rows = Array.from({ length: FUTURE_MONTH_LIMIT }, (_, index) => {
         const rowMonth = new Date(monthDate);
         rowMonth.setUTCMonth(rowMonth.getUTCMonth() + index);
         return { month: rowMonth, amountCents };
       });
-      await prisma.monthlyBudget.createMany({ data: rows, skipDuplicates: true });
-      // Re-assert the amount for rows that already existed with another value.
-      await prisma.monthlyBudget.updateMany({ where: { month: { gte: monthDate } }, data: { amountCents } });
+      const windowEnd = new Date(monthDate);
+      windowEnd.setUTCMonth(windowEnd.getUTCMonth() + FUTURE_MONTH_LIMIT);
+      await prisma.$transaction([
+        prisma.monthlyBudget.createMany({ data: rows, skipDuplicates: true }),
+        // Re-assert the amount for rows that already existed with another value.
+        prisma.monthlyBudget.updateMany({ where: { month: { gte: monthDate, lt: windowEnd } }, data: { amountCents } }),
+      ]);
       return NextResponse.json({ budget: { amountCents }, scope, monthsSet: rows.length });
     }
 

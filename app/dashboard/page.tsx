@@ -114,7 +114,7 @@ export default function DashboardPage() {
   }).format(new Date()), []);
 
   const focusDateLabel = data?.monthStatus === "future" ? "未开始" : data && data.focusDate === data.today ? "今天" : data ? dateLabel(data.focusDate) : "";
-  const chartTitle = data?.monthStatus === "future" ? "月初预览" : "最近 7 天";
+  const chartTitle = data?.monthStatus === "future" ? "月初预览" : data?.monthStatus === "past" ? "月末 7 天" : "最近 7 天";
   // Once a preset (or explicit budget) covers the month, the prompt banner
   // stays hidden — budget management lives in 设置.
   const showBudgetPrompt = Boolean(data && data.budgetSource === "none");

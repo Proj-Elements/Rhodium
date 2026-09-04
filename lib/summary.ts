@@ -1,5 +1,6 @@
 import { TransactionType } from "@prisma/client";
-import { dateOnlyKey, daysInMonth, monthStart, todayInShanghai } from "@/lib/domain";
+import { calculateRemaining, dateOnlyKey, daysInMonth, monthStart, todayInShanghai } from "@/lib/domain";
+import { resolveBudget } from "@/lib/budget";
 import { prisma } from "@/lib/prisma";
 import { serializeSettlement } from "@/lib/serializers";
 
@@ -18,7 +19,9 @@ export async function getMonthSummary(month: string) {
   nextStart.setUTCMonth(nextStart.getUTCMonth() + 1);
 
   const [budget, transactions, settlement] = await Promise.all([
-    prisma.monthlyBudget.findUnique({ where: { month: start } }),
+    // Must go through resolveBudget: a month with no explicit row still
+    // inherits the preset, and settlement snapshots are built from this value.
+    resolveBudget(month),
     prisma.transaction.findMany({
       where: { deletedAt: null, occurredOn: { gte: start, lt: nextStart } },
       select: { occurredOn: true, amountCents: true, type: true, source: true, categoryId: true, category: { select: { name: true } } },
@@ -69,10 +72,11 @@ export async function getMonthSummary(month: string) {
 
   return {
     month,
-    budgetCents: budget?.amountCents ?? null,
+    budgetCents: budget.amountCents,
+    budgetSource: budget.source,
     expenseCents,
     incomeCents,
-    remainingCents: budget ? budget.amountCents - expenseCents : null,
+    remainingCents: calculateRemaining(budget.amountCents, expenseCents),
     dailyAverageCents: expenseTransactionCount ? Math.round(expenseCents / Math.max(1, elapsedDays)) : 0,
     dailyBreakdown,
     topCategory,

@@ -6,8 +6,10 @@ import { prisma } from "@/lib/prisma";
 /** Run the real sync at most once in this window; other callers reuse the result. */
 const SYNC_COOLDOWN_MS = 60_000;
 
-let lastSyncAt = 0;
-let lastSyncPromise: Promise<{ created: number; syncedThrough: string }> | null = null;
+type SyncResult = { created: number; syncedThrough: string };
+
+let lastSync: { at: number; referenceDate: string; result: SyncResult } | null = null;
+let inFlight: { referenceDate: string; promise: Promise<SyncResult> } | null = null;
 
 /**
  * Batched subscription sync (fixed the previous N+1: one query per month for
@@ -18,17 +20,35 @@ let lastSyncPromise: Promise<{ created: number; syncedThrough: string }> | null 
  *  2. one findMany fetches existing occurrence keys,
  *  3. createMany inserts the remainder (race-safe via the unique key).
  *
- * Calls are debounced: within the cooldown window every caller shares the
- * in-flight/last result instead of re-querying the database.
+ * Two layers of call reduction:
+ *  - a successful run is cached for the cooldown window, so back-to-back
+ *    requests reuse the result instead of re-querying the database,
+ *  - concurrent callers share the in-flight promise.
+ * A failed run is never cached, and the shared promise is dropped so one
+ * failure cannot poison later callers.
  */
-export function syncSubscriptions(referenceDate = todayInShanghai()) {
-  const now = Date.now();
-  if (lastSyncPromise && now - lastSyncAt < SYNC_COOLDOWN_MS) return lastSyncPromise;
-  lastSyncAt = now;
-  lastSyncPromise = runSync(referenceDate).finally(() => {
-    lastSyncPromise = null;
-  });
-  return lastSyncPromise;
+export function syncSubscriptions(referenceDate = todayInShanghai()): Promise<SyncResult> {
+  if (lastSync && lastSync.referenceDate === referenceDate && Date.now() - lastSync.at < SYNC_COOLDOWN_MS) {
+    return Promise.resolve(lastSync.result);
+  }
+  if (inFlight && inFlight.referenceDate === referenceDate) return inFlight.promise;
+
+  const promise = runSync(referenceDate)
+    .then((result) => {
+      lastSync = { at: Date.now(), referenceDate, result };
+      return result;
+    })
+    .finally(() => {
+      if (inFlight?.promise === promise) inFlight = null;
+    });
+  inFlight = { referenceDate, promise };
+  return promise;
+}
+
+/** Test-only: drop the cooldown cache so each case starts from a clean slate. */
+export function resetSubscriptionSyncCache() {
+  lastSync = null;
+  inFlight = null;
 }
 
 async function runSync(referenceDate: string) {
