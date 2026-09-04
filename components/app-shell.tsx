@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Icon } from "@/components/icon";
 import { ColorModeToggle } from "@/components/color-mode-toggle";
+import { apiFetch } from "@/lib/api-client";
+import { nextColorMode } from "@/lib/theme";
 import { useColorMode } from "@/lib/use-color-mode";
 
 type NavItem = { href: string; label: string; description: string; icon: "grid" | "receipt" | "repeat" | "calendar" | "settings" };
@@ -27,21 +29,6 @@ const titles: Record<string, { eyebrow: string; title: string; description: stri
   "/settings": { eyebrow: "SETTINGS", title: "把账本调成你的样子。", description: "管理分类、导入旧账，或把数据完整地带走。" },
 };
 
-/** Mirrors the CSS breakpoint: below this width the mobile chrome is used. */
-const MOBILE_QUERY = "(max-width: 900px)";
-
-function useIsMobileViewport() {
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => {
-    const query = window.matchMedia(MOBILE_QUERY);
-    const update = () => setIsMobile(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return isMobile;
-}
-
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   return <Link href={item.href} className={`nav-item${active ? " active" : ""}`}>
     <span className="nav-icon"><Icon name={item.icon} size={17} /></span>
@@ -54,15 +41,14 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const page = titles[pathname] || titles["/dashboard"];
   const [syncState, setSyncState] = useState<"syncing" | "ready" | "error">("syncing");
-  const isMobile = useIsMobileViewport();
-  const { mode, setMode: setColorMode, hydrated: themeHydrated } = useColorMode();
+  const { mode, setMode: setColorMode, hydrated: themeHydrated, systemDark } = useColorMode();
 
   useEffect(() => {
-    let mounted = true;
-    fetch("/api/subscriptions/sync", { method: "POST" })
-      .then((response) => { if (!response.ok) throw new Error("sync failed"); if (mounted) setSyncState("ready"); })
-      .catch(() => { if (mounted) setSyncState("error"); });
-    return () => { mounted = false; };
+    const controller = new AbortController();
+    apiFetch("/api/subscriptions/sync", { method: "POST", signal: controller.signal })
+      .then(() => setSyncState("ready"))
+      .catch(() => { if (!controller.signal.aborted) setSyncState("error"); });
+    return () => controller.abort();
   }, []);
 
   const syncLabel = syncState === "syncing" ? "正在同步固定支出" : syncState === "error" ? "同步稍后重试" : "固定支出已同步";
@@ -88,31 +74,28 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="sidebar-footer">CNY · ASIA/SHANGHAI</div>
     </aside>
     <main className="main-content">
-      {/* Mobile chrome is only mounted on narrow viewports; previously it was
-          always in the DOM and merely hidden by CSS, so any stylesheet glitch
-          leaked the nav bar onto wide screens (top-right of the window). */}
-      {isMobile && (
-        <>
-          <div className="mobile-topbar">
-            <Link href="/dashboard" className="mobile-brand"><span className="brand-mark"><span>月</span></span><strong>月余</strong></Link>
-            <div className="mobile-topbar-actions">
-              <button
-                type="button"
-                className="icon-button theme-cycle-button"
-                aria-label={`颜色模式：${mode === "system" ? "跟随系统" : mode === "light" ? "亮色" : "暗色"}（点按切换）`}
-                disabled={!themeHydrated}
-                onClick={() => setColorMode(mode === "system" ? (themeHydrated && document.documentElement.dataset.colorScheme === "dark" ? "light" : "dark") : mode === "light" ? "dark" : "system")}
-              >
-                <Icon name={mode === "system" ? "monitor" : mode === "light" ? "sun" : "moon"} size={16} />
-              </button>
-              <Link href="/transactions?new=1" className="button button-primary button-small"><Icon name="plus" size={15} />记一笔</Link>
-            </div>
-          </div>
-          <nav className="mobile-nav" aria-label="移动端导航">
-            {[...navItems, ...secondaryItems].map((item) => <Link href={item.href} key={item.href} className={pathname === item.href ? "active" : ""}><Icon name={item.icon} size={18} /><span>{item.label}</span></Link>)}
-          </nav>
-        </>
-      )}
+      {/* Mobile chrome stays mounted and is shown/hidden purely by the
+          (max-width: 900px) media query in globals.css. Gating it on a
+          matchMedia state instead made narrow viewports render the desktop
+          header on the first paint, then swap in the mobile bars. */}
+      <div className="mobile-topbar">
+        <Link href="/dashboard" className="mobile-brand"><span className="brand-mark"><span>月</span></span><strong>月余</strong></Link>
+        <div className="mobile-topbar-actions">
+          <button
+            type="button"
+            className="icon-button theme-cycle-button"
+            aria-label={`颜色模式：${mode === "system" ? "跟随系统" : mode === "light" ? "亮色" : "暗色"}（点按切换）`}
+            disabled={!themeHydrated}
+            onClick={() => setColorMode(nextColorMode(mode, systemDark))}
+          >
+            <Icon name={mode === "system" ? "monitor" : mode === "light" ? "sun" : "moon"} size={16} />
+          </button>
+          <Link href="/transactions?new=1" className="button button-primary button-small"><Icon name="plus" size={15} />记一笔</Link>
+        </div>
+      </div>
+      <nav className="mobile-nav" aria-label="移动端导航">
+        {[...navItems, ...secondaryItems].map((item) => <Link href={item.href} key={item.href} className={pathname === item.href ? "active" : ""}><Icon name={item.icon} size={18} /><span>{item.label}</span></Link>)}
+      </nav>
       <header className="page-header">
         <div className="page-header-copy">
           <p className="eyebrow">{page.eyebrow}</p>

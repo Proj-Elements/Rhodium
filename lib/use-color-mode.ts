@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { readStoredColorMode, schemeForMode, storeColorMode, systemPrefersDark, type ColorMode } from "@/lib/theme";
+import { readStoredColorMode, schemeForMode, storeColorMode, type ColorMode } from "@/lib/theme";
 
 /**
  * Single source of truth for the color mode. Mirrors the boot script in
@@ -12,10 +12,21 @@ import { readStoredColorMode, schemeForMode, storeColorMode, systemPrefersDark, 
 export function useColorMode() {
   const [mode, setMode] = useState<ColorMode>("system");
   const [hydrated, setHydrated] = useState(false);
+  const [systemDark, setSystemDark] = useState(false);
 
   useEffect(() => {
     setMode(readStoredColorMode());
     setHydrated(true);
+  }, []);
+
+  // Track the OS scheme as state so consumers can render labels from it
+  // without calling matchMedia during render (which breaks SSR/hydration).
+  useEffect(() => {
+    const query = window.matchMedia("(prefers-color-scheme: dark)");
+    const update = () => setSystemDark(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
   }, []);
 
   // Apply the mode to <html> whenever it changes, and (while in "system")
@@ -36,5 +47,5 @@ export function useColorMode() {
     storeColorMode(next);
   }, []);
 
-  return { mode, setMode: setModeAndStore, hydrated, systemDark: systemPrefersDark() };
+  return { mode, setMode: setModeAndStore, hydrated, systemDark };
 }
