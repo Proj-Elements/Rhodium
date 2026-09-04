@@ -1,3 +1,5 @@
+import { badRequest } from "@/lib/errors";
+
 const SHANGHAI_TIME_ZONE = "Asia/Shanghai";
 
 export type TransactionKind = "expense" | "income";
@@ -24,14 +26,14 @@ const weekdayDateFormatter = new Intl.DateTimeFormat("zh-CN", {
 });
 
 export function parseDateOnly(value: string): Date {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error("日期格式应为 YYYY-MM-DD");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw badRequest("日期格式应为 YYYY-MM-DD");
   const date = new Date(`${value}T00:00:00.000Z`);
-  if (Number.isNaN(date.getTime()) || dateOnlyKey(date) !== value) throw new Error("日期无效");
+  if (Number.isNaN(date.getTime()) || dateOnlyKey(date) !== value) throw badRequest("日期无效");
   return date;
 }
 
 export function parseMonth(value: string): Date {
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) throw new Error("月份格式应为 YYYY-MM");
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) throw badRequest("月份格式应为 YYYY-MM");
   return new Date(`${value}-01T00:00:00.000Z`);
 }
 
@@ -81,11 +83,11 @@ export function billingDate(month: string, billingDay: number): Date {
 }
 
 export function moneyToCents(value: string | number): number {
-  if (typeof value === "string" && !value.trim()) throw new Error("金额不能为空");
+  if (typeof value === "string" && !value.trim()) throw badRequest("金额不能为空");
   const numeric = typeof value === "number" ? value : Number(value.replace(/,/g, "").trim());
-  if (!Number.isFinite(numeric) || numeric < 0) throw new Error("金额必须是非负数字");
+  if (!Number.isFinite(numeric) || numeric < 0) throw badRequest("金额必须是非负数字");
   const cents = Math.round(numeric * 100);
-  if (cents > 2_000_000_000) throw new Error("金额超出可记录范围");
+  if (cents > 2_000_000_000) throw badRequest("金额超出可记录范围");
   return cents;
 }
 
