@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server";
-import { handleApiError, parseJsonBody, jsonError } from "@/lib/api";
-import { moneyToCents, monthStart } from "@/lib/domain";
+import { handleApiError, parseJsonBody } from "@/lib/api";
 import { notFound } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { subscriptionSchema, subscriptionToggleSchema } from "@/lib/validation";
-import { syncSubscriptions } from "@/lib/subscriptions";
+import { assertExpenseCategory, subscriptionData, syncSubscriptions } from "@/lib/subscriptions";
 import { serializeSubscription, subscriptionInclude } from "@/lib/subscription-serializer";
 
 export const dynamic = "force-dynamic";
 
 type Context = { params: Promise<{ id: string }> };
-
 
 export async function PATCH(request: Request, { params }: Context) {
   try {
@@ -33,20 +31,10 @@ export async function PATCH(request: Request, { params }: Context) {
     }
 
     const parsed = subscriptionSchema.parse(body);
-    const category = await prisma.category.findFirst({ where: { id: parsed.categoryId, archivedAt: null, OR: [{ type: "EXPENSE" }, { type: "BOTH" }] } });
-    if (!category) return jsonError("订阅必须使用有效的支出分类");
+    await assertExpenseCategory(parsed.categoryId);
     const subscription = await prisma.subscription.update({
       where: { id },
-      data: {
-        name: parsed.name,
-        amountCents: moneyToCents(parsed.amount),
-        billingDay: parsed.billingDay,
-        categoryId: parsed.categoryId,
-        startMonth: monthStart(parsed.startMonth),
-        endMonth: parsed.endMonth ? monthStart(parsed.endMonth) : null,
-        active: parsed.active,
-        note: parsed.note?.trim() || null,
-      },
+      data: subscriptionData(parsed),
       include: subscriptionInclude,
     });
     await syncSubscriptions();

@@ -4,7 +4,7 @@ import { calculateRemaining, calculateUsage, dateOnlyKey, daysInMonth, parseMont
 import { handleApiError, monthRange } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultCategories } from "@/lib/seed";
-import { serializeTransaction } from "@/lib/serializers";
+import { serializeTransaction, transactionInclude } from "@/lib/serializers";
 import { syncSubscriptions } from "@/lib/subscriptions";
 import { resolveBudget } from "@/lib/budget";
 
@@ -48,7 +48,7 @@ export async function GET(request: Request) {
       }),
       prisma.transaction.findMany({
         where: monthTxWhere,
-        include: { category: true, subscription: { select: { name: true } } },
+        include: transactionInclude,
         orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }],
         take: 10,
       }),

@@ -2,6 +2,9 @@ import { dateOnlyKey } from "@/lib/domain";
 import type { CategoryDTO, TransactionDTO } from "@/lib/types";
 import type { Category, Transaction } from "@prisma/client";
 
+/** Relations every transaction response needs in order to be serialized. */
+export const transactionInclude = { category: true, subscription: { select: { name: true } } } as const;
+
 type TransactionWithRelations = Transaction & {
   category: Category;
   subscription: { name: string } | null;

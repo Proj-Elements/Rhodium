@@ -115,8 +115,3 @@ export function calculateUsage(budgetCents: number | null, expenseCents: number)
 export function dateLabel(value: string): string {
   return weekdayDateFormatter.format(parseDateOnly(value));
 }
-
-export function clampText(value: string | null | undefined, fallback = "未填写备注"): string {
-  const text = value?.trim();
-  return text || fallback;
-}

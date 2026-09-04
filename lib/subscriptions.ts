@@ -1,7 +1,38 @@
 import { TransactionType } from "@prisma/client";
-import { dateOnlyKey, monthStart, todayInShanghai } from "@/lib/domain";
+import { dateOnlyKey, moneyToCents, monthStart, todayInShanghai } from "@/lib/domain";
+import { badRequest } from "@/lib/errors";
 import { planBillingCandidates } from "@/lib/subscription-planner";
 import { prisma } from "@/lib/prisma";
+import type { subscriptionSchema } from "@/lib/validation";
+import type { z } from "zod";
+
+type SubscriptionInput = z.infer<typeof subscriptionSchema>;
+
+/**
+ * Reject a subscription whose category cannot hold expenses. Both the create
+ * and update routes need the same check, and the same wording.
+ */
+export async function assertExpenseCategory(categoryId: string): Promise<void> {
+  const category = await prisma.category.findFirst({
+    where: { id: categoryId, archivedAt: null, OR: [{ type: "EXPENSE" }, { type: "BOTH" }] },
+    select: { id: true },
+  });
+  if (!category) throw badRequest("订阅必须使用有效的支出分类");
+}
+
+/** Map validated input onto the Prisma columns shared by create and update. */
+export function subscriptionData(input: SubscriptionInput) {
+  return {
+    name: input.name,
+    amountCents: moneyToCents(input.amount),
+    billingDay: input.billingDay,
+    categoryId: input.categoryId,
+    startMonth: monthStart(input.startMonth),
+    endMonth: input.endMonth ? monthStart(input.endMonth) : null,
+    active: input.active,
+    note: input.note?.trim() || null,
+  };
+}
 
 /** Run the real sync at most once in this window; other callers reuse the result. */
 const SYNC_COOLDOWN_MS = 60_000;

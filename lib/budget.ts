@@ -13,30 +13,25 @@ export async function setBudgetPreset(amountCents: number): Promise<void> {
 
 export type BudgetSource = "month" | "preset" | "none";
 
+export type ResolvedBudget = { amountCents: number | null; source: BudgetSource };
+
+const NO_BUDGET: ResolvedBudget = { amountCents: null, source: "none" };
+
 /**
  * Single source of truth for "what is this month's budget":
  * the explicit MonthlyBudget row if one exists, otherwise the preset.
  * Both rows are fetched in one round trip; callers that also need to know
  * where the number came from read `source`.
  */
-export async function resolveBudget(month: string): Promise<{ amountCents: number | null; source: BudgetSource }> {
+export async function resolveBudget(month: string): Promise<ResolvedBudget> {
   const [budget, preset] = await Promise.all([
     prisma.monthlyBudget.findUnique({ where: { month: monthStart(month) }, select: { amountCents: true } }),
     getBudgetPreset(),
   ]);
   if (budget) return { amountCents: budget.amountCents, source: "month" };
   if (preset !== null) return { amountCents: preset, source: "preset" };
-  return { amountCents: null, source: "none" };
+  return NO_BUDGET;
 }
-
-/** Effective budget in cents, or null when neither a month row nor a preset is set. */
-export async function resolveBudgetCents(month: string): Promise<number | null> {
-  return (await resolveBudget(month)).amountCents;
-}
-
-export type ResolvedBudget = { amountCents: number | null; source: BudgetSource };
-
-const NO_BUDGET: ResolvedBudget = { amountCents: null, source: "none" };
 
 /**
  * Batch form of `resolveBudget`: two queries for any number of months, so
