@@ -233,6 +233,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .month-switcher { display: inline-flex; align-items: center; gap: 5px; padding: 4px; border: 1px solid var(--line); border-radius: 7px; background: var(--card); }
 .month-switcher button { display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 5px; background: transparent; color: var(--muted); }
 .month-switcher button:hover { background: var(--canvas); color: var(--ink); }
+.month-switcher button:disabled { opacity: 0.45; cursor: default; }
+.month-switcher button:disabled:hover { background: transparent; color: var(--muted); }
+.month-switcher[aria-busy="true"] strong { color: var(--muted); }
 .month-switcher strong { min-width: 92px; color: var(--ink); font-family: var(--mono); font-size: 12px; font-weight: 500; text-align: center; }
 .month-switcher-current { width: auto !important; height: 30px; margin-left: 2px; padding: 4px 8px; border: 0; border-radius: 5px; background: var(--orange-soft) !important; color: var(--orange) !important; font-size: 11px; }
 .month-switcher .chevron-left, .month-switcher .chevron-right { display: inline-flex; }

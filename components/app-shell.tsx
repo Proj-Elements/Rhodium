@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { Icon } from "@/components/icon";
 import { ColorModeToggle } from "@/components/color-mode-toggle";
+import { requestNewTransaction } from "@/lib/new-transaction-intent";
 import { useColorMode } from "@/lib/use-color-mode";
 
 type NavItem = { href: string; label: string; description: string; icon: "grid" | "receipt" | "repeat" | "calendar" | "settings" };
@@ -73,10 +74,18 @@ function NavLink({ item, active }: { item: NavItem; active: boolean }) {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const page = titles[pathname] || titles["/dashboard"];
   const [syncState, setSyncState] = useState<"syncing" | "ready" | "error">("syncing");
   const isMobile = useIsMobileViewport();
   const { mode, setMode: setColorMode, hydrated: themeHydrated } = useColorMode();
+
+  // Was a <Link href="/transactions?new=1">, which did nothing when the user was
+  // already on /transactions: same-route navigation does not remount the page.
+  function openNewTransaction() {
+    requestNewTransaction();
+    if (pathname !== "/transactions") router.push("/transactions");
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -126,7 +135,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               >
                 <Icon name={mode === "system" ? "monitor" : mode === "light" ? "sun" : "moon"} size={16} />
               </button>
-              <Link href="/transactions?new=1" className="button button-primary button-small"><Icon name="plus" size={15} />记一笔</Link>
+              <button type="button" onClick={openNewTransaction} className="button button-primary button-small"><Icon name="plus" size={15} />记一笔</button>
             </div>
           </div>
           <nav className="mobile-nav" aria-label="移动端导航">
@@ -140,7 +149,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           <h1>{page.title}</h1>
           <p className="page-description">{page.description}</p>
         </div>
-        <Link href="/transactions?new=1" className="button button-primary page-cta"><Icon name="plus" size={17} />记一笔</Link>
+        <button type="button" onClick={openNewTransaction} className="button button-primary page-cta"><Icon name="plus" size={17} />记一笔</button>
       </header>
       <div className="page-content">{children}</div>
     </main>

@@ -9,7 +9,9 @@ import { Toast, useFlash } from "@/components/toast";
 import { TransactionForm } from "@/components/transaction-form";
 import { apiFetch, errorMessage } from "@/lib/api-client";
 import { getCategoryColor } from "@/lib/category-colors";
-import { dateLabel, formatMoney, todayInShanghai } from "@/lib/domain";
+import { dateLabel, formatMoney } from "@/lib/domain";
+import { requestNewTransaction } from "@/lib/new-transaction-intent";
+import { useToday } from "@/lib/use-today";
 import { CategoryDTO, DashboardDTO } from "@/lib/types";
 
 function formatShortDate(value: string) {
@@ -48,10 +50,14 @@ function SpendingChart({ days }: { days: DashboardDTO["recentExpenses"] }) {
 }
 
 export default function DashboardPage() {
-  const [month, setMonthRaw] = useState(todayInShanghai().slice(0, 7));
+  // The date arrives after mount (the page is statically prerendered), so the month
+  // is empty on the first render and the switcher shows its placeholder until then.
+  const today = useToday();
+  const [monthOverride, setMonthOverride] = useState("");
+  const month = monthOverride || (today ? today.slice(0, 7) : "");
   const [reloadToken, setReloadToken] = useState(0);
   // A reload token lets any handler refetch without month changing.
-  const setMonth = (next: string) => { setMonthRaw(next); };
+  const setMonth = (next: string) => { setMonthOverride(next); };
   const reload = () => setReloadToken((token) => token + 1);
   const [data, setData] = useState<DashboardDTO | null>(null);
   const [categories, setCategories] = useState<CategoryDTO[]>([]);
@@ -63,6 +69,7 @@ export default function DashboardPage() {
   const { message, flash } = useFlash();
 
   useEffect(() => {
+    if (!month) return;
     // AbortController prevents stale responses from overwriting fresh ones
     // when the user switches months quickly.
     const controller = new AbortController();
@@ -106,12 +113,12 @@ export default function DashboardPage() {
     }
   }
 
-  const greeting = useMemo(() => new Intl.DateTimeFormat("zh-CN", {
+  const greeting = useMemo(() => (today ? new Intl.DateTimeFormat("zh-CN", {
     month: "long",
     day: "numeric",
     weekday: "long",
     timeZone: "Asia/Shanghai",
-  }).format(new Date()), []);
+  }).format(new Date(`${today}T00:00:00+08:00`)) : "正在打开你的账本"), [today]);
 
   const focusDateLabel = data?.monthStatus === "future" ? "未开始" : data && data.focusDate === data.today ? "今天" : data ? dateLabel(data.focusDate) : "";
   const chartTitle = data?.monthStatus === "future" ? "月初预览" : "最近 7 天";
@@ -158,7 +165,7 @@ export default function DashboardPage() {
 
       <div className="dashboard-grid">
         <section className="card chart-card"><div className="section-heading"><div><h2>{chartTitle}</h2><p>{data.monthStatus === "future" ? "月份开始后，这里会记录每天的花销。" : "花销的节奏，比总额更早提醒你。"}</p></div><Link className="text-link" href={`/transactions?month=${month}`}>查看全部 <Icon name="arrow" size={14} /></Link></div><SpendingChart days={data.recentExpenses} /></section>
-        <section className="card category-card"><div className="section-heading"><div><h2>本月花销去向</h2><p>{data.categoryBreakdown.length ? `${data.categoryBreakdown.length} 个分类 · 按金额排序` : "还没有分类数据"}</p></div></div>{data.categoryBreakdown.length === 0 ? <div className="empty-state">本月还没有支出。<Link className="text-link" href={`/transactions?month=${month}&new=1`}>记下第一笔 <Icon name="arrow" size={13} /></Link></div> : <div className="category-list-rows">{data.categoryBreakdown.slice(0, 5).map((category, index) => { const percent = data.expenseCents ? Math.round((category.amountCents / data.expenseCents) * 100) : 0; const palette = getCategoryColor(category.categoryId); return <div key={category.categoryId}><div className="category-row"><span className="category-rank">0{index + 1}</span><span className="category-dot" style={{ background: palette.color }} /><span className="category-name">{category.categoryName}</span><span className="category-amount">{formatMoney(category.amountCents)}</span><span className="category-percent">{percent}%</span></div><div className="category-bar"><span style={{ width: `${percent}%`, background: palette.color }} /></div></div>; })}{data.categoryBreakdown.length > 5 && <p className="category-more">还有 {data.categoryBreakdown.length - 5} 个分类没有展开</p>}</div>}</section>
+        <section className="card category-card"><div className="section-heading"><div><h2>本月花销去向</h2><p>{data.categoryBreakdown.length ? `${data.categoryBreakdown.length} 个分类 · 按金额排序` : "还没有分类数据"}</p></div></div>{data.categoryBreakdown.length === 0 ? <div className="empty-state">本月还没有支出。<Link className="text-link" href={`/transactions?month=${month}`} onClick={requestNewTransaction}>记下第一笔 <Icon name="arrow" size={13} /></Link></div> : <div className="category-list-rows">{data.categoryBreakdown.slice(0, 5).map((category, index) => { const percent = data.expenseCents ? Math.round((category.amountCents / data.expenseCents) * 100) : 0; const palette = getCategoryColor(category.categoryId); return <div key={category.categoryId}><div className="category-row"><span className="category-rank">0{index + 1}</span><span className="category-dot" style={{ background: palette.color }} /><span className="category-name">{category.categoryName}</span><span className="category-amount">{formatMoney(category.amountCents)}</span><span className="category-percent">{percent}%</span></div><div className="category-bar"><span style={{ width: `${percent}%`, background: palette.color }} /></div></div>; })}{data.categoryBreakdown.length > 5 && <p className="category-more">还有 {data.categoryBreakdown.length - 5} 个分类没有展开</p>}</div>}</section>
       </div>
 
       <section className="card recent-card"><div className="section-heading"><div><h2>最近记下的</h2><p>把小额支出记下来，月末回看就不会模糊。</p></div><button type="button" className="button button-secondary button-small" onClick={() => setShowForm(true)}><Icon name="plus" size={14} />添加记录</button></div><div className="transaction-list">{data.recentTransactions.length === 0 ? <div className="empty-state"><strong>还没有账目</strong>从一杯早餐咖啡开始记录吧。<button type="button" className="button button-primary button-small" onClick={() => setShowForm(true)}>开始记录</button></div> : data.recentTransactions.map((transaction) => { const palette = getCategoryColor(transaction.category.id); return <div className="transaction-item" key={transaction.id}><span className={`transaction-symbol${transaction.type === "INCOME" ? " income-symbol" : " expense-symbol"}`} style={transaction.type === "INCOME" ? undefined : { color: palette.color, backgroundColor: palette.surface }}><CategoryIcon categoryName={transaction.category.name} type={transaction.type} size={16} /></span><div className="transaction-main"><strong>{transaction.note || transaction.category.name}{transaction.source === "SUBSCRIPTION" && <span className="source-badge">订阅</span>}</strong><span>{transaction.category.name} · {transaction.occurredOn}</span></div><span className={`transaction-amount ${transaction.type === "INCOME" ? "income" : "expense"}`}>{transaction.type === "INCOME" ? "+" : "−"}{formatMoney(transaction.amountCents)}</span></div>; })}</div></section>

@@ -10,6 +10,7 @@ import { TransactionForm } from "@/components/transaction-form";
 import { apiFetch, errorMessage } from "@/lib/api-client";
 import { getCategoryColor } from "@/lib/category-colors";
 import { dateLabel, formatMoney, todayInShanghai } from "@/lib/domain";
+import { consumeNewTransactionIntent, subscribeNewTransactionIntent } from "@/lib/new-transaction-intent";
 import { CategoryDTO, TransactionDTO } from "@/lib/types";
 
 type TransactionFilter = "all" | "expense" | "income";
@@ -26,7 +27,9 @@ type TransactionsPayload = { month: string; readOnly: boolean; transactions: Tra
 const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 export default function TransactionsPage() {
-  const [month, setMonth] = useState(() => todayInShanghai().slice(0, 7));
+  // Empty until the client resolves it: this page is statically prerendered, so
+  // reading today's date during render would bake the build month into the HTML.
+  const [month, setMonth] = useState("");
   const [transactions, setTransactions] = useState<TransactionDTO[]>([]);
   const [categories, setCategories] = useState<CategoryDTO[]>([]);
   const [filter, setFilter] = useState<TransactionFilter>("all");
@@ -70,28 +73,35 @@ export default function TransactionsPage() {
   }
 
   useEffect(() => {
-    // The page is statically prerendered, so the deep link cannot be read during
-    // the first render without a hydration mismatch. Consume it here instead, and
-    // skip this pass when it changes the month: the effect immediately re-runs with
-    // the requested month, so a deep link costs one request instead of two.
+    // The page is statically prerendered, so neither today's date nor the deep link
+    // can be read during the first render without a hydration mismatch. Resolve both
+    // here and bail out of this pass — the effect re-runs immediately with the
+    // resolved month, so the initial load still costs one request instead of two.
     if (!deepLinkHandled.current) {
       deepLinkHandled.current = true;
       const params = new URLSearchParams(window.location.search);
       const requestedMonth = params.get("month");
-      if (params.get("new") === "1") setShowForm(true);
-      // Clear the one-shot params so a refresh does not reopen the form or snap
-      // back to the deep-linked month.
+      // Clear the one-shot param so a refresh does not snap back to the deep-linked month.
       if (params.toString()) window.history.replaceState(null, "", window.location.pathname);
-      if (requestedMonth && MONTH_PATTERN.test(requestedMonth) && requestedMonth !== month) {
-        setMonth(requestedMonth);
-        return;
-      }
+      setMonth(requestedMonth && MONTH_PATTERN.test(requestedMonth) ? requestedMonth : todayInShanghai().slice(0, 7));
+      return;
     }
+    if (!month) return;
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month/filter change
   }, [month, filter, reloadToken]);
+
+  // "记一笔" in the app chrome hands the intent over in memory, so it works even
+  // when the user is already here and no navigation happens.
+  useEffect(() => {
+    const open = () => {
+      if (consumeNewTransactionIntent()) setShowForm(true);
+    };
+    open();
+    return subscribeNewTransactionIntent(open);
+  }, []);
 
   useEffect(() => () => {
     if (undoTimer.current) window.clearTimeout(undoTimer.current);
@@ -157,7 +167,7 @@ export default function TransactionsPage() {
 
   const activeCategories = categories.filter((category) => !category.archivedAt);
   const today = todayInShanghai();
-  const defaultEntryDate = month === today.slice(0, 7) ? today : `${month}-01`;
+  const defaultEntryDate = !month || month === today.slice(0, 7) ? today : `${month}-01`;
 
   function openNew() {
     if (!readOnly) setShowForm(true);

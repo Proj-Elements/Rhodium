@@ -8,6 +8,7 @@ import { MonthSwitcher } from "@/components/month-switcher";
 import { Toast, useFlash } from "@/components/toast";
 import { apiFetch, errorMessage } from "@/lib/api-client";
 import { formatMoney, monthStart, todayInShanghai } from "@/lib/domain";
+import { useToday } from "@/lib/use-today";
 
 type Summary = {
   month: string;
@@ -35,8 +36,8 @@ function shortMonth(month: string) {
   return month.slice(5);
 }
 
-function getStatus(month: string): Status {
-  const current = todayInShanghai().slice(0, 7);
+function getStatus(month: string, today: string): Status {
+  const current = today.slice(0, 7);
   return month < current ? "past" : month > current ? "future" : "current";
 }
 
@@ -80,7 +81,9 @@ function DailyCalendar({ month, days }: { month: string; days: Summary["dailyBre
 const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 
 export default function SettlementsPage() {
-  const [month, setMonth] = useState(() => todayInShanghai().slice(0, 7));
+  // Empty until the client resolves it: this page is statically prerendered, so
+  // reading today's date during render would bake the build month into the HTML.
+  const [month, setMonth] = useState("");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [trend, setTrend] = useState<Summary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,24 +92,24 @@ export default function SettlementsPage() {
   const [reloadToken, setReloadToken] = useState(0);
   const deepLinkHandled = useRef(false);
   const { message, flash } = useFlash();
-  const status = getStatus(month);
+  const today = useToday();
+  const status = today && month ? getStatus(month, today) : null;
 
   const reload = () => setReloadToken((token) => token + 1);
 
   useEffect(() => {
-    // The page is statically prerendered, so `?month=` cannot be read during the
-    // first render without a hydration mismatch. Consume it here and skip this pass
-    // when it changes the month: the effect re-runs immediately with the requested
-    // month, so a deep link costs one request instead of two.
+    // The page is statically prerendered, so neither today's date nor `?month=` can
+    // be read during the first render without a hydration mismatch. Resolve both here
+    // and bail out of this pass — the effect re-runs immediately with the resolved
+    // month, so the initial load still costs one request instead of two.
     if (!deepLinkHandled.current) {
       deepLinkHandled.current = true;
       const requestedMonth = new URLSearchParams(window.location.search).get("month");
       if (window.location.search) window.history.replaceState(null, "", window.location.pathname);
-      if (requestedMonth && MONTH_PATTERN.test(requestedMonth) && requestedMonth !== month) {
-        setMonth(requestedMonth);
-        return;
-      }
+      setMonth(requestedMonth && MONTH_PATTERN.test(requestedMonth) ? requestedMonth : todayInShanghai().slice(0, 7));
+      return;
     }
+    if (!month) return;
     const controller = new AbortController();
     async function load() {
       setLoading(true);
@@ -130,7 +133,7 @@ export default function SettlementsPage() {
   }, [month, reloadToken]);
 
   async function settle() {
-    if (status === "future" || busy) return;
+    if (!status || status === "future" || busy) return;
     if (!window.confirm(`确认结算${monthLabel(month)}吗？结算后该月账目会暂时变为只读。`)) return;
     setBusy(true);
     try {
@@ -167,7 +170,7 @@ export default function SettlementsPage() {
   const trendDescription = useMemo(() => trend.length ? `${shortMonth(trend[0].month)} — ${shortMonth(trend[trend.length - 1].month)} · 对比每月总额` : "还没有历史支出", [trend]);
 
   return <AppShell>
-    <div className="toolbar"><span className="toolbar-note"><Icon name="calendar" size={14} /><span>{status === "current" ? "正在查看本月" : status === "past" ? "历史账本" : "提前看看未来"}</span></span><MonthSwitcher month={month} onChange={setMonth} /></div>
+    <div className="toolbar"><span className="toolbar-note"><Icon name="calendar" size={14} /><span>{status === "current" ? "正在查看本月" : status === "past" ? "历史账本" : status === "future" ? "提前看看未来" : "正在打开月度回顾"}</span></span><MonthSwitcher month={month} onChange={setMonth} /></div>
     {loading ? <div className="loading">正在计算本月结算…</div> : error ? <div className="inline-error"><strong>{error}</strong><button type="button" className="button button-secondary button-small" onClick={reload}>再试一次</button></div> : !summary ? <div className="inline-error">暂时没有可显示的月度回顾。</div> : <>
       <div className="summary-head"><div><h2>{monthLabel(month)}</h2><span className="summary-status"><i className={`status-dot ${settled ? "done" : status === "future" ? "pending" : ""}`} />{statusText}</span>{settledAt && <p className="summary-date">快照保存于 {settledAt}</p>}</div><div>{status === "future" ? <button type="button" className="button button-secondary" disabled>未来月份不可结算</button> : settled ? <button type="button" className="button button-secondary" onClick={() => void reopen()} disabled={busy}>重新打开</button> : <button type="button" className="button button-primary" onClick={() => void settle()} disabled={busy}><Icon name="check" size={16} />完成结算</button>}</div></div>
       <div className="summary-grid"><div className="card summary-stat"><p className="card-label">MONTHLY BUDGET</p><strong>{summary.budgetCents === null ? "尚未设置" : formatMoney(summary.budgetCents)}</strong><span>本月计划边界</span></div><div className="card summary-stat"><p className="card-label">SPENT</p><strong className="expense">{formatMoney(summary.expenseCents)}</strong><span>{summary.transactionCount} 笔支出</span></div><div className="card summary-stat"><p className="card-label">REMAINING</p><strong>{summary.remainingCents === null ? "—" : formatMoney(summary.remainingCents)}</strong><span>收入另计 {formatMoney(summary.incomeCents)}</span></div><div className="card summary-stat"><p className="card-label">NET FLOW</p><strong className={netCents < 0 ? "expense" : "income"}>{netCents >= 0 ? "+" : "−"}{formatMoney(Math.abs(netCents))}</strong><span>收入减去本月支出</span></div></div>
