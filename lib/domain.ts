@@ -93,7 +93,10 @@ export function moneyToCents(value: string | number): number {
   if (typeof value === "string" && !value.trim()) throw new Error("金额不能为空");
   const numeric = typeof value === "number" ? value : Number(value.replace(/,/g, "").trim());
   if (!Number.isFinite(numeric) || numeric < 0) throw new Error("金额必须是非负数字");
-  const cents = Math.round(numeric * 100);
+  // `numeric * 100` carries a binary artifact (1.005 * 100 === 100.49999999999999),
+  // so the product is snapped back to its decimal value before rounding. Without
+  // this, a half-cent input rounds down and silently loses a cent.
+  const cents = Math.round(Number((numeric * 100).toFixed(4)));
   if (cents > 2_000_000_000) throw new Error("金额超出可记录范围");
   return cents;
 }

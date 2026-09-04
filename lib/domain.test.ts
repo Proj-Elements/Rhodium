@@ -5,6 +5,22 @@ describe("domain money and budget rules", () => {
   it("converts yuan to integer cents without floating point drift", () => {
     expect(moneyToCents("12.34")).toBe(1234);
     expect(moneyToCents(0.1 + 0.2)).toBe(30);
+    expect(moneyToCents("1,234.56")).toBe(123456);
+  });
+
+  it("rounds a half cent up instead of losing it to binary drift", () => {
+    // 1.005 * 100 === 100.49999999999999 in IEEE 754.
+    expect(moneyToCents("1.005")).toBe(101);
+    expect(moneyToCents("2.675")).toBe(268);
+    expect(moneyToCents("1.234")).toBe(123);
+  });
+
+  it("rejects negative, blank, and out-of-range amounts", () => {
+    expect(() => moneyToCents("-1")).toThrow("金额必须是非负数字");
+    expect(() => moneyToCents("  ")).toThrow("金额不能为空");
+    expect(() => moneyToCents("abc")).toThrow("金额必须是非负数字");
+    expect(() => moneyToCents("20000000.01")).toThrow("金额超出可记录范围");
+    expect(moneyToCents("20000000")).toBe(2_000_000_000);
   });
 
   it("rejects malformed dates and months instead of normalizing them", () => {
