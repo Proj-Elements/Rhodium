@@ -40,9 +40,13 @@ function getStatus(month: string): Status {
   return month < current ? "past" : month > current ? "future" : "current";
 }
 
+// Intl formatters are expensive to build; the calendar renders one call per day
+// cell per month change, so keep a single instance at module scope.
+const compactMoneyFormatter = new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 1 });
+
 function formatCalendarMoney(cents: number) {
   if (cents === 0) return "";
-  return new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 1 }).format(cents / 100);
+  return compactMoneyFormatter.format(cents / 100);
 }
 
 function DailyCalendar({ month, days }: { month: string; days: Summary["dailyBreakdown"] }) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { CategoryDTO, SubscriptionDTO } from "@/lib/types";
 import { Icon } from "@/components/icon";
 
@@ -14,7 +14,10 @@ export function SubscriptionForm({ categories, subscription, defaultMonth, onClo
   const [note, setNote] = useState(subscription?.note || "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const available = categories.filter((category) => !category.archivedAt && (category.type === "EXPENSE" || category.type === "BOTH"));
+  const available = useMemo(
+    () => categories.filter((category) => !category.archivedAt && (category.type === "EXPENSE" || category.type === "BOTH")),
+    [categories],
+  );
 
   useEffect(() => {
     if (!categoryId && available.length) setCategoryId(available[0].id);

@@ -30,6 +30,27 @@ const titles: Record<string, { eyebrow: string; title: string; description: stri
 /** Mirrors the CSS breakpoint: below this width the mobile chrome is used. */
 const MOBILE_QUERY = "(max-width: 900px)";
 
+/**
+ * Every data route already runs the (debounced) server-side subscription sync, so
+ * this ping only exists to drive the sidebar indicator. AppShell remounts on each
+ * client-side navigation, so the promise is cached at module scope to keep it at
+ * one request per browser session instead of one per page view. Failures are not
+ * cached so the next navigation retries.
+ */
+let syncPing: Promise<void> | null = null;
+
+function pingSubscriptionSync() {
+  if (syncPing) return syncPing;
+  const pending = fetch("/api/subscriptions/sync", { method: "POST" }).then((response) => {
+    if (!response.ok) throw new Error("sync failed");
+  });
+  syncPing = pending;
+  pending.catch(() => {
+    if (syncPing === pending) syncPing = null;
+  });
+  return pending;
+}
+
 function useIsMobileViewport() {
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
@@ -59,8 +80,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
-    fetch("/api/subscriptions/sync", { method: "POST" })
-      .then((response) => { if (!response.ok) throw new Error("sync failed"); if (mounted) setSyncState("ready"); })
+    pingSubscriptionSync()
+      .then(() => { if (mounted) setSyncState("ready"); })
       .catch(() => { if (mounted) setSyncState("error"); });
     return () => { mounted = false; };
   }, []);

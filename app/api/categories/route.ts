@@ -10,6 +10,8 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
+    // This is the one read path that must seed: a fresh database has to return the
+    // default categories so the pickers on every other page are not empty.
     await ensureDefaultCategories();
     const categories = await prisma.category.findMany({ orderBy: [{ archivedAt: "asc" }, { sortOrder: "asc" }, { name: "asc" }] });
     return NextResponse.json({ categories: categories.map(serializeCategory) });

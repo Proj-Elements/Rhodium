@@ -19,16 +19,24 @@ let lastSyncPromise: Promise<{ created: number; syncedThrough: string }> | null 
  *  3. createMany inserts the remainder (race-safe via the unique key).
  *
  * Calls are debounced: within the cooldown window every caller shares the
- * in-flight/last result instead of re-querying the database.
+ * in-flight *or already settled* result. The cached promise is only dropped when
+ * the window expires or the sync failed, so a burst of dashboard requests does
+ * one round of queries rather than one per request.
  */
 export function syncSubscriptions(referenceDate = todayInShanghai()) {
   const now = Date.now();
   if (lastSyncPromise && now - lastSyncAt < SYNC_COOLDOWN_MS) return lastSyncPromise;
   lastSyncAt = now;
-  lastSyncPromise = runSync(referenceDate).finally(() => {
-    lastSyncPromise = null;
+  const pending = runSync(referenceDate);
+  lastSyncPromise = pending;
+  // A failed sync must not be cached: the next caller should retry immediately.
+  pending.catch(() => {
+    if (lastSyncPromise === pending) {
+      lastSyncPromise = null;
+      lastSyncAt = 0;
+    }
   });
-  return lastSyncPromise;
+  return pending;
 }
 
 async function runSync(referenceDate: string) {

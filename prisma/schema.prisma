@@ -58,6 +58,10 @@ model Transaction {
 
   @@index([occurredOn, deletedAt])
   @@index([categoryId, occurredOn])
+  // Month aggregates filter on type + deletedAt before range-scanning occurredOn.
+  @@index([type, deletedAt, occurredOn])
+  // Postgres does not index foreign keys automatically.
+  @@index([subscriptionId])
 }
 
 model Subscription {

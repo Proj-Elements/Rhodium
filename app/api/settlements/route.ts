@@ -16,10 +16,10 @@ export async function GET(request: Request) {
     const includeFocus = url.searchParams.get("include") === "focus";
     await syncSubscriptions();
     const months = Array.from({ length: 6 }, (_, index) => addMonths(end, index - 5));
-    const [summaries, focus] = await Promise.all([
-      Promise.all(months.map(getMonthSummary)),
-      includeFocus ? getMonthSummary(end) : Promise.resolve(null),
-    ]);
+    const summaries = await Promise.all(months.map(getMonthSummary));
+    // The focus month is the last window entry, so reuse it instead of
+    // recomputing the whole month a seventh time.
+    const focus = includeFocus ? summaries[summaries.length - 1] : null;
     return NextResponse.json({ summaries, ...(includeFocus ? { focus } : {}) });
   } catch (error) {
     return handleApiError(error);

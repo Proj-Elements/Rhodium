@@ -18,7 +18,6 @@ export async function GET(request: Request) {
     const month = url.searchParams.get("month") || todayInShanghai().slice(0, 7);
     parseMonth(month);
     const type = url.searchParams.get("type");
-    await ensureDefaultCategories();
     await syncSubscriptions();
     const { start, nextStart } = monthRange(month);
     const transactions = await prisma.transaction.findMany({

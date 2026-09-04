@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { handleApiError, parseJsonBody } from "@/lib/api";
 import { moneyToCents, monthStart } from "@/lib/domain";
 import { prisma } from "@/lib/prisma";
-import { ensureDefaultCategories } from "@/lib/seed";
 import { subscriptionSchema } from "@/lib/validation";
 import { syncSubscriptions } from "@/lib/subscriptions";
 import { serializeSubscription, subscriptionInclude } from "@/lib/subscription-serializer";
@@ -11,7 +10,6 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    await ensureDefaultCategories();
     const subscriptions = await prisma.subscription.findMany({ include: subscriptionInclude, orderBy: [{ active: "desc" }, { billingDay: "asc" }] });
     return NextResponse.json({ subscriptions: subscriptions.map(serializeSubscription) });
   } catch (error) {
