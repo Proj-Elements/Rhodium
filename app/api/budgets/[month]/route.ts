@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { handleApiError, parseJsonBody, monthRange } from "@/lib/api";
-import { moneyToCents, monthStart, parseMonth } from "@/lib/domain";
+import { addMonths, moneyToCents, monthKey, monthStart, parseMonth } from "@/lib/domain";
 import { conflict } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { budgetSchema } from "@/lib/validation";
@@ -14,11 +14,17 @@ type Context = { params: Promise<{ month: string }> };
 
 const putQuerySchema = z.object({
   // "month" (default): only this month gets an explicit budget row.
-  // "future": this month AND every month after it get explicit rows
-  // (the preset stops applying to them).
+  // "future": this month AND every month inside the horizon below get explicit
+  // rows (the preset stops applying to them).
   scope: z.enum(["month", "future"]).default("month"),
 });
 
+/**
+ * How far ahead `scope=future` materialises explicit rows. Months beyond the
+ * horizon keep whatever they already had — the previous implementation issued an
+ * unbounded `updateMany({ month: { gte } })` that silently overwrote budgets the
+ * user had set past this window.
+ */
 const FUTURE_MONTH_LIMIT = 240; // 20 years of rows, plenty for a personal ledger.
 
 export async function GET(_request: Request, { params }: Context) {
@@ -50,17 +56,28 @@ export async function PUT(request: Request, { params }: Context) {
     const monthDate = monthRange(month).start;
 
     if (scope === "future") {
-      // Write explicit rows for this month and the following ones so the
-      // preset no longer applies to them.
-      const rows = Array.from({ length: FUTURE_MONTH_LIMIT }, (_, index) => {
-        const rowMonth = new Date(monthDate);
-        rowMonth.setUTCMonth(rowMonth.getUTCMonth() + index);
-        return { month: rowMonth, amountCents };
+      // Explicit rows for [month, month + FUTURE_MONTH_LIMIT). Anything past the
+      // horizon is deliberately left alone.
+      const horizonEnd = monthStart(addMonths(month, FUTURE_MONTH_LIMIT - 1));
+      // Settled months keep their own budget: rewriting one would desync the
+      // snapshot already stored in MonthlySettlement.
+      const locked = await prisma.monthlySettlement.findMany({
+        where: { month: { gte: monthDate, lte: horizonEnd }, reopenedAt: null },
+        select: { month: true },
       });
-      await prisma.monthlyBudget.createMany({ data: rows, skipDuplicates: true });
-      // Re-assert the amount for rows that already existed with another value.
-      await prisma.monthlyBudget.updateMany({ where: { month: { gte: monthDate } }, data: { amountCents } });
-      return NextResponse.json({ budget: { amountCents }, scope, monthsSet: rows.length });
+      const lockedKeys = new Set(locked.map((row) => monthKey(row.month)));
+      const rows = Array.from({ length: FUTURE_MONTH_LIMIT }, (_, index) => monthStart(addMonths(month, index)))
+        .filter((rowMonth) => !lockedKeys.has(monthKey(rowMonth)))
+        .map((rowMonth) => ({ month: rowMonth, amountCents }));
+      await prisma.$transaction([
+        prisma.monthlyBudget.createMany({ data: rows, skipDuplicates: true }),
+        // Re-assert the amount for rows that already existed with another value.
+        prisma.monthlyBudget.updateMany({
+          where: { month: { gte: monthDate, lte: horizonEnd, notIn: locked.map((row) => row.month) } },
+          data: { amountCents },
+        }),
+      ]);
+      return NextResponse.json({ budget: { amountCents }, scope, monthsSet: rows.length, throughMonth: monthKey(horizonEnd) });
     }
 
     const budget = await prisma.monthlyBudget.upsert({

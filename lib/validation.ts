@@ -71,8 +71,66 @@ export const categoryPatchSchema = z
   .strict()
   .refine((body) => Object.keys(body).length > 0, "没有需要更新的字段");
 
+const backupIdValue = z.string().trim().min(1).max(60);
+
+/**
+ * Backup payloads used to be `z.record(z.unknown())`, which let a caller push
+ * arbitrary shapes — including primary keys — straight into `upsert`. The rows
+ * are now described explicitly and unknown keys are stripped.
+ *
+ * `id` is kept only as a *correlation* key so transactions referencing a
+ * category/subscription can be re-pointed; the import route never writes it as a
+ * database primary key.
+ */
+const backupCategorySchema = z.object({
+  id: backupIdValue,
+  name: z.string().trim().min(1).max(30),
+  type: z.string().optional().nullable(),
+  isSystem: z.union([z.boolean(), z.string()]).optional(),
+  sortOrder: z.union([z.number(), z.string()]).optional(),
+  archivedAt: z.string().optional().nullable(),
+});
+
+const backupSubscriptionSchema = z.object({
+  id: backupIdValue,
+  name: z.string().trim().min(1).max(80),
+  amountCents: z.union([z.number(), z.string()]),
+  billingDay: z.union([z.number(), z.string()]),
+  categoryId: backupIdValue,
+  startMonth: z.string(),
+  endMonth: z.string().optional().nullable(),
+  active: z.union([z.boolean(), z.string()]).optional(),
+  note: z.string().max(200).optional().nullable(),
+});
+
+const backupBudgetSchema = z.object({
+  month: dateValue,
+  amountCents: z.union([z.number(), z.string()]),
+});
+
+const backupSettlementSchema = z.object({
+  month: dateValue,
+  budgetAmountCents: z.union([z.number(), z.string()]),
+  expenseAmountCents: z.union([z.number(), z.string()]),
+  incomeAmountCents: z.union([z.number(), z.string()]),
+  remainingAmountCents: z.union([z.number(), z.string()]).optional().nullable(),
+  settledAt: z.string().optional().nullable(),
+  reopenedAt: z.string().optional().nullable(),
+});
+
+export const backupSchema = z.object({
+  version: z.union([z.number(), z.string()]).optional(),
+  exportedAt: z.string().optional(),
+  categories: z.array(backupCategorySchema).max(500).optional(),
+  subscriptions: z.array(backupSubscriptionSchema).max(500).optional(),
+  budgets: z.array(backupBudgetSchema).max(1200).optional(),
+  settlements: z.array(backupSettlementSchema).max(1200).optional(),
+});
+
+export type BackupPayload = z.infer<typeof backupSchema>;
+
 export const importSchema = z.object({
   format: z.enum(["json", "csv"]),
   rows: z.array(z.record(z.unknown())).min(1).max(5000),
-  backup: z.record(z.unknown()).optional(),
+  backup: backupSchema.optional(),
 });

@@ -3,10 +3,9 @@ import { TransactionType } from "@prisma/client";
 import { calculateRemaining, calculateUsage, dateOnlyKey, daysInMonth, parseMonth, todayInShanghai } from "@/lib/domain";
 import { handleApiError, monthRange } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
-import { ensureDefaultCategories } from "@/lib/seed";
 import { serializeTransaction } from "@/lib/serializers";
 import { syncSubscriptions } from "@/lib/subscriptions";
-import { getBudgetPreset, hasExplicitBudget } from "@/lib/budget";
+import { resolveMonthBudget } from "@/lib/budget";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +14,9 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const month = url.searchParams.get("month") || todayInShanghai().slice(0, 7);
     parseMonth(month);
-    await ensureDefaultCategories();
+    // Subscription charges belong to this month's totals, so they must exist
+    // before we aggregate. The call is cooldown-cached, so a warm process does
+    // no write here.
     await syncSubscriptions();
 
     const { start, nextStart } = monthRange(month);
@@ -30,9 +31,8 @@ export async function GET(request: Request) {
     const chartDayCount = Math.floor((focusDate.getTime() - chartStart.getTime()) / 86_400_000) + 1;
 
     const monthTxWhere = { deletedAt: null as null, occurredOn: { gte: start, lt: nextStart } };
-    const [preset, hasExplicit, expense, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups] = await Promise.all([
-      getBudgetPreset(),
-      hasExplicitBudget(month),
+    const [budget, expense, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups] = await Promise.all([
+      resolveMonthBudget(month),
       prisma.transaction.aggregate({
         where: { ...monthTxWhere, type: TransactionType.EXPENSE },
         _sum: { amountCents: true },
@@ -53,6 +53,8 @@ export async function GET(request: Request) {
         orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }],
         take: 10,
       }),
+      // Grouping by category through the relation avoids the follow-up
+      // category.findMany that used to run after this batch.
       prisma.transaction.groupBy({
         by: ["categoryId"],
         where: { ...monthTxWhere, type: TransactionType.EXPENSE },
@@ -73,9 +75,14 @@ export async function GET(request: Request) {
       }),
     ]);
 
-    const categoryIds = grouped.map((item) => item.categoryId);
-    const categories = await prisma.category.findMany({ where: { id: { in: categoryIds } } });
-    const categoryMap = new Map(categories.map((category) => [category.id, category.name]));
+    // The 10 recent transactions already carry their categories; only ids that
+    // are not among them need a lookup, which is usually none.
+    const categoryMap = new Map(transactions.map((item) => [item.categoryId, item.category.name]));
+    const missingCategoryIds = grouped.map((item) => item.categoryId).filter((id) => !categoryMap.has(id));
+    if (missingCategoryIds.length) {
+      const categories = await prisma.category.findMany({ where: { id: { in: missingCategoryIds } }, select: { id: true, name: true } });
+      for (const category of categories) categoryMap.set(category.id, category.name);
+    }
 
     const expenseByDate = new Map(recentExpenseGroups.map((item) => [dateOnlyKey(item.occurredOn), item._sum.amountCents ?? 0]));
     const incomeByDate = new Map(recentIncomeGroups.map((item) => [dateOnlyKey(item.occurredOn), item._sum.amountCents ?? 0]));
@@ -89,20 +96,17 @@ export async function GET(request: Request) {
     const focusDateExpenseCents = focusGroups.find((group) => group.type === TransactionType.EXPENSE)?._sum.amountCents ?? 0;
     const focusDateIncomeCents = focusGroups.find((group) => group.type === TransactionType.INCOME)?._sum.amountCents ?? 0;
     const expenseCents = expense._sum.amountCents ?? 0;
-    // Effective budget = explicit month row, falling back to the preset.
-    const budgetCents = hasExplicit ? await prisma.monthlyBudget.findUnique({ where: { month: start }, select: { amountCents: true } }).then((row) => row?.amountCents ?? null) : preset;
+    const budgetCents = budget.amountCents;
     return NextResponse.json({
       month,
       today,
       focusDate: dateOnlyKey(focusDate),
       budget: budgetCents === null ? null : { amountCents: budgetCents },
-      budgetSource: budgetCents === null ? "none" : hasExplicit ? "month" : "preset",
+      budgetSource: budget.source,
       expenseCents,
       incomeCents: income._sum.amountCents ?? 0,
       remainingCents: calculateRemaining(budgetCents, expenseCents),
       usagePercent: calculateUsage(budgetCents, expenseCents),
-      todayExpenseCents: focusDateExpenseCents,
-      todayIncomeCents: focusDateIncomeCents,
       focusDateExpenseCents,
       focusDateIncomeCents,
       transactionCount,

@@ -1,6 +1,7 @@
 import { TransactionType } from "@prisma/client";
 import { dateOnlyKey, daysInMonth, monthStart, todayInShanghai } from "@/lib/domain";
 import { prisma } from "@/lib/prisma";
+import { resolveMonthBudget, type BudgetSource } from "@/lib/budget";
 import { serializeSettlement } from "@/lib/serializers";
 
 export async function isMonthLocked(month: string) {
@@ -11,6 +12,10 @@ export async function isMonthLocked(month: string) {
 /**
  * One transactions fetch feeds expense totals, category breakdown, top-date and
  * the daily calendar (previously the month was fetched twice).
+ *
+ * The budget resolves through `resolveMonthBudget`, so a month covered only by
+ * the BudgetPreset reports its effective budget here too — the monthly review
+ * and the settlement snapshot used to read `null` and persist 0.
  */
 export async function getMonthSummary(month: string) {
   const start = monthStart(month);
@@ -18,7 +23,7 @@ export async function getMonthSummary(month: string) {
   nextStart.setUTCMonth(nextStart.getUTCMonth() + 1);
 
   const [budget, transactions, settlement] = await Promise.all([
-    prisma.monthlyBudget.findUnique({ where: { month: start } }),
+    resolveMonthBudget(month),
     prisma.transaction.findMany({
       where: { deletedAt: null, occurredOn: { gte: start, lt: nextStart } },
       select: { occurredOn: true, amountCents: true, type: true, source: true, categoryId: true, category: { select: { name: true } } },
@@ -69,10 +74,11 @@ export async function getMonthSummary(month: string) {
 
   return {
     month,
-    budgetCents: budget?.amountCents ?? null,
+    budgetCents: budget.amountCents,
+    budgetSource: budget.source satisfies BudgetSource,
     expenseCents,
     incomeCents,
-    remainingCents: budget ? budget.amountCents - expenseCents : null,
+    remainingCents: budget.amountCents === null ? null : budget.amountCents - expenseCents,
     dailyAverageCents: expenseTransactionCount ? Math.round(expenseCents / Math.max(1, elapsedDays)) : 0,
     dailyBreakdown,
     topCategory,

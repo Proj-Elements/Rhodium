@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { handleApiError, parseJsonBody } from "@/lib/api";
+import { monthKey, monthStart } from "@/lib/domain";
 import {
   normalizeRow,
   parseBoolean,
@@ -14,89 +15,138 @@ import {
 import { conflict } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultCategories } from "@/lib/seed";
-import { importSchema } from "@/lib/validation";
+import { importSchema, type BackupPayload } from "@/lib/validation";
 import { isMonthLocked } from "@/lib/summary";
-import { CategoryType, type Prisma } from "@prisma/client";
+import { CategoryType, TransactionType, type Category, type Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
-type Row = Record<string, unknown>;
 type Tx = Prisma.TransactionClient;
 
+/** Long enough for a 5000-row restore, bounded so a stuck import cannot pin a connection. */
+const IMPORT_TRANSACTION_OPTIONS = { timeout: 120_000, maxWait: 15_000 } as const;
+
 /**
- * Collect all unique subscriptionOccurrenceKeys a row set would write, then
- * clear any that already exist with identical data. Re-importing the same
- * backup previously crashed the whole import with a P2002 unique violation.
+ * Backup ids are *correlation* keys only: they line up rows inside one payload
+ * (a transaction pointing at a category, a subscription pointing at a category)
+ * and are never written as database primary keys. A restore therefore merges into
+ * the existing ledger instead of overwriting rows the caller names by id.
  */
-async function dedupeOccurrenceKeys(tx: Tx, rows: NormalizedRow[]) {
-  const keys = [...new Set(rows.map((row) => row.subscriptionOccurrenceKey).filter((key): key is string => Boolean(key)))];
-  if (!keys.length) return;
+type IdMap = { categories: Map<string, string>; subscriptions: Map<string, string> };
+
+/**
+ * Reconcile the subscriptionOccurrenceKeys a row set wants to write against the
+ * keys already in the database. Returns the keys that must be dropped from the
+ * incoming rows because a live transaction already represents that occurrence.
+ *
+ * Keys held by soft-deleted rows are released so the occurrence can be
+ * re-imported; keys held by a live row are left alone (re-importing them used to
+ * abort the whole restore with a P2002 unique violation).
+ */
+async function reconcileOccurrenceKeys(tx: Tx, wanted: Map<string, string | null>): Promise<Set<string>> {
+  const keys = [...wanted.keys()];
+  if (!keys.length) return new Set();
   const existing = await tx.transaction.findMany({
     where: { subscriptionOccurrenceKey: { in: keys } },
-    select: { subscriptionOccurrenceKey: true, deletedAt: true },
+    select: { id: true, subscriptionOccurrenceKey: true, deletedAt: true },
   });
-  const deletedKeys = new Set(existing.filter((item) => item.deletedAt).map((item) => item.subscriptionOccurrenceKey));
-  const staleKeys = keys.filter((key) => deletedKeys.has(key));
-  if (staleKeys.length) {
-    // A deleted auto-entry is being re-imported: reuse the key by clearing the old row.
-    await tx.transaction.updateMany({ where: { subscriptionOccurrenceKey: { in: staleKeys } }, data: { subscriptionOccurrenceKey: null } });
+
+  const release: string[] = [];
+  const taken = new Set<string>();
+  for (const row of existing) {
+    const key = row.subscriptionOccurrenceKey as string;
+    if (row.deletedAt) release.push(key);
+    else if (wanted.get(key) !== row.id) taken.add(key);
   }
+
+  if (release.length) {
+    await tx.transaction.updateMany({ where: { subscriptionOccurrenceKey: { in: release } }, data: { subscriptionOccurrenceKey: null } });
+  }
+  return taken;
 }
 
-async function importBackup(tx: Tx, backup: Row, categoryIdMap: Map<string, string>) {
-  const backupCategories = Array.isArray(backup.categories) ? (backup.categories as Row[]) : [];
-  for (const row of backupCategories) {
-    if (typeof row.id !== "string" || typeof row.name !== "string" || !row.name.trim()) continue;
+/**
+ * Restore the non-transaction parts of a backup.
+ *
+ * Every entity is matched on its natural key — categories on (name, type),
+ * subscriptions on name, budgets and settlements on month — so an import merges
+ * into the existing ledger. Backup ids only populate `idMap` so transaction rows
+ * referencing them can be re-pointed at the local row.
+ */
+async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
+  const existingCategories = await tx.category.findMany();
+  const categoryByNameType = new Map(existingCategories.map((category) => [`${category.name}|${category.type}`, category]));
+  const categoryById = new Map(existingCategories.map((category) => [category.id, category]));
+
+  for (const row of backup.categories ?? []) {
+    const name = row.name.trim();
     const type = parseCategoryType(row.type);
-    const sameName = await tx.category.findFirst({ where: { name: row.name.trim(), type } });
-    if (sameName && sameName.id !== row.id) {
-      categoryIdMap.set(row.id, sameName.id);
+    const existing = categoryByNameType.get(`${name}|${type}`);
+    if (existing) {
+      idMap.categories.set(row.id, existing.id);
       continue;
     }
-    const data = {
-      name: row.name.trim(),
-      type,
-      isSystem: parseBoolean(row.isSystem, false),
-      sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : 0,
-      archivedAt: optionalDateTime(row.archivedAt, "分类归档时间"),
-    };
-    await tx.category.upsert({ where: { id: row.id }, create: { id: row.id, ...data }, update: data });
-    categoryIdMap.set(row.id, row.id);
+    const created = await tx.category.create({
+      data: {
+        name,
+        type,
+        // isSystem is owned by the seed (it gates archiving in the UI), so an
+        // imported category never claims it.
+        isSystem: false,
+        sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : 0,
+        archivedAt: optionalDateTime(row.archivedAt, "分类归档时间"),
+      },
+    });
+    categoryByNameType.set(`${name}|${type}`, created);
+    categoryById.set(created.id, created);
+    idMap.categories.set(row.id, created.id);
   }
 
-  const backupSubscriptions = Array.isArray(backup.subscriptions) ? (backup.subscriptions as Row[]) : [];
-  for (const row of backupSubscriptions) {
-    if (typeof row.id !== "string" || typeof row.name !== "string" || typeof row.categoryId !== "string") continue;
-    const categoryId = categoryIdMap.get(row.categoryId) ?? row.categoryId;
-    const category = await tx.category.findFirst({ where: { id: categoryId, type: { in: [CategoryType.EXPENSE, CategoryType.BOTH] } } });
-    if (!category) throw conflict(`订阅「${row.name}」的分类不存在`);
-    const billingDay = Number(row.billingDay);
-    if (!Number.isInteger(billingDay) || billingDay < 1 || billingDay > 31) throw conflict("订阅扣款日格式不正确");
-    const data = {
-      name: row.name.trim(),
-      amountCents: parseCents(row.amountCents, "订阅金额"),
-      billingDay,
-      categoryId,
-      startMonth: parseMonthValue(row.startMonth, "订阅开始月份"),
-      endMonth: row.endMonth ? parseMonthValue(row.endMonth, "订阅结束月份") : null,
-      active: parseBoolean(row.active, true),
-      note: typeof row.note === "string" ? row.note.trim() || null : null,
-    };
-    await tx.subscription.upsert({ where: { id: row.id }, create: { id: row.id, ...data }, update: data });
+  const backupSubscriptions = backup.subscriptions ?? [];
+  if (backupSubscriptions.length) {
+    const names = [...new Set(backupSubscriptions.map((row) => row.name.trim()))];
+    const existingSubscriptions = await tx.subscription.findMany({ where: { name: { in: names } }, select: { id: true, name: true } });
+    const subscriptionByName = new Map(existingSubscriptions.map((item) => [item.name, item.id]));
+
+    for (const row of backupSubscriptions) {
+      const name = row.name.trim();
+      const categoryId = idMap.categories.get(row.categoryId) ?? row.categoryId;
+      const category = categoryById.get(categoryId);
+      if (!category || (category.type !== CategoryType.EXPENSE && category.type !== CategoryType.BOTH)) {
+        throw conflict(`订阅「${name}」的分类不存在`);
+      }
+      const billingDay = Number(row.billingDay);
+      if (!Number.isInteger(billingDay) || billingDay < 1 || billingDay > 31) throw conflict("订阅扣款日格式不正确");
+      const startMonth = parseMonthValue(row.startMonth, "订阅开始月份");
+      const endMonth = row.endMonth ? parseMonthValue(row.endMonth, "订阅结束月份") : null;
+      if (endMonth && endMonth < startMonth) throw conflict(`订阅「${name}」的结束月份不能早于开始月份`);
+      const data = {
+        name,
+        amountCents: parseCents(row.amountCents, "订阅金额"),
+        billingDay,
+        categoryId: category.id,
+        startMonth,
+        endMonth,
+        active: parseBoolean(row.active, true),
+        note: typeof row.note === "string" ? row.note.trim() || null : null,
+      };
+      const existingId = subscriptionByName.get(name);
+      const saved = existingId
+        ? await tx.subscription.update({ where: { id: existingId }, data, select: { id: true } })
+        : await tx.subscription.create({ data, select: { id: true } });
+      subscriptionByName.set(name, saved.id);
+      idMap.subscriptions.set(row.id, saved.id);
+    }
   }
 
-  const backupBudgets = Array.isArray(backup.budgets) ? (backup.budgets as Row[]) : [];
-  for (const row of backupBudgets) {
-    if (typeof row.month !== "string") continue;
+  for (const row of backup.budgets ?? []) {
     const month = optionalDate(row.month, "预算月份");
     if (!month) continue;
     const amountCents = parseCents(row.amountCents, "预算金额");
-    await tx.monthlyBudget.upsert({ where: { month }, create: month ? { month, amountCents } : { month, amountCents }, update: { amountCents } });
+    await tx.monthlyBudget.upsert({ where: { month }, create: { month, amountCents }, update: { amountCents } });
   }
 
-  const backupSettlements = Array.isArray(backup.settlements) ? (backup.settlements as Row[]) : [];
-  for (const row of backupSettlements) {
-    if (typeof row.month !== "string") continue;
+  for (const row of backup.settlements ?? []) {
     const month = optionalDate(row.month, "结算月份");
     if (!month) continue;
     const data = {
@@ -104,12 +154,36 @@ async function importBackup(tx: Tx, backup: Row, categoryIdMap: Map<string, stri
       budgetAmountCents: parseCents(row.budgetAmountCents, "结算预算金额"),
       expenseAmountCents: parseCents(row.expenseAmountCents, "结算支出金额"),
       incomeAmountCents: parseCents(row.incomeAmountCents, "结算收入金额"),
-      remainingAmountCents: row.remainingAmountCents === null || row.remainingAmountCents === undefined ? null : parseSignedCents(row.remainingAmountCents, "结算剩余金额"),
+      remainingAmountCents:
+        row.remainingAmountCents === null || row.remainingAmountCents === undefined
+          ? null
+          : parseSignedCents(row.remainingAmountCents, "结算剩余金额"),
       settledAt: optionalDateTime(row.settledAt, "结算时间") ?? new Date(),
       reopenedAt: optionalDateTime(row.reopenedAt, "重新打开时间"),
     };
     await tx.monthlySettlement.upsert({ where: { month }, create: data, update: data });
   }
+}
+
+/**
+ * Category used when a row names one that does not exist. Prefers the seeded
+ * 「其他」 catch-all but degrades to any usable category (and finally creates
+ * one) instead of throwing, so a renamed catch-all no longer fails the import.
+ */
+async function resolveFallbackCategory(tx: Tx, categories: Category[]): Promise<Category> {
+  const usable = categories.filter((category) => category.archivedAt === null);
+  return (
+    usable.find((category) => category.name === "其他" && category.type === CategoryType.BOTH) ??
+    usable.find((category) => category.type === CategoryType.BOTH) ??
+    usable.find((category) => category.type === CategoryType.EXPENSE) ??
+    (await tx.category.create({ data: { name: "其他", type: CategoryType.BOTH, isSystem: true, sortOrder: 99 } }))
+  );
+}
+
+/** Returns the category only when it is active and usable for `wanted`. */
+function usableFor(category: Category | undefined, wanted: CategoryType): Category | undefined {
+  if (!category || category.archivedAt !== null) return undefined;
+  return category.type === wanted || category.type === CategoryType.BOTH ? category : undefined;
 }
 
 export async function POST(request: Request) {
@@ -124,66 +198,126 @@ export async function POST(request: Request) {
       throw conflict(error instanceof Error ? error.message : "导入数据格式不正确");
     }
 
-    const months = [...new Set(normalizedRows.map((row) => `${row.occurredOn.toISOString().slice(0, 7)}`))];
-    const lockedMonths = (
-      await Promise.all(months.map(async (month) => ({ month, locked: await isMonthLocked(month) })))
-    )
+    // Only a full backup envelope may address existing rows by id; a bare row
+    // list (CSV or hand-built JSON) always inserts, so it cannot overwrite.
+    const restoringBackup = Boolean(body.backup);
+    const externalIds = restoringBackup
+      ? [...new Set(normalizedRows.map((row) => row.externalId).filter((id): id is string => Boolean(id)))]
+      : [];
+
+    // Locked months are rejected for both the incoming dates *and* the months
+    // the targeted rows currently live in, so an update cannot silently mutate a
+    // settled month by moving a row out of it.
+    const targetMonths = normalizedRows.map((row) => monthKey(row.occurredOn));
+    const existingMonths = externalIds.length
+      ? (await prisma.transaction.findMany({ where: { id: { in: externalIds } }, select: { occurredOn: true } })).map((item) =>
+          monthKey(item.occurredOn),
+        )
+      : [];
+    const months = [...new Set([...targetMonths, ...existingMonths])];
+    const lockedMonths = (await Promise.all(months.map(async (month) => ({ month, locked: await isMonthLocked(month) }))))
       .filter((item) => item.locked)
       .map((item) => item.month);
-    if (lockedMonths.length) throw conflict(`${lockedMonths.join("、")} 已结算，请先重新打开后再导入`);
+    if (lockedMonths.length) throw conflict(`${lockedMonths.sort().join("、")} 已结算，请先重新打开后再导入`);
 
     await ensureDefaultCategories();
     let imported = 0;
-    const categoryIdMap = new Map<string, string>();
+    const idMap: IdMap = { categories: new Map(), subscriptions: new Map() };
 
     await prisma.$transaction(async (tx) => {
-      if (body.backup) await importBackup(tx, body.backup, categoryIdMap);
+      if (body.backup) await importBackup(tx, body.backup, idMap);
 
       // Preload the whole category list once instead of findFirst per row.
       const categories = await tx.category.findMany();
-      type CategoryKey = { byId: Map<string, typeof categories[number]>; byNameType: Map<string, typeof categories[number]> };
-      const index: CategoryKey = { byId: new Map(), byNameType: new Map() };
-      for (const category of categories) {
-        index.byId.set(category.id, category);
-        index.byNameType.set(`${category.name}|${category.type}`, category);
-      }
+      const byId = new Map(categories.map((category) => [category.id, category]));
+      const byNameType = new Map(categories.map((category) => [`${category.name}|${category.type}`, category]));
+      const fallbackCategory = await resolveFallbackCategory(tx, categories);
 
-      const expenseFallback = index.byNameType.get("其他|BOTH") ?? (await tx.category.findFirstOrThrow({ where: { name: "其他" } }));
+      // Resolve every referenced subscription in one query (was one per row).
+      const referencedSubscriptionIds = [
+        ...new Set(
+          normalizedRows
+            .map((row) => (row.subscriptionId ? idMap.subscriptions.get(row.subscriptionId) ?? row.subscriptionId : null))
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ];
+      const knownSubscriptionIds = new Set(
+        referencedSubscriptionIds.length
+          ? (await tx.subscription.findMany({ where: { id: { in: referencedSubscriptionIds } }, select: { id: true } })).map((item) => item.id)
+          : [],
+      );
 
-      await dedupeOccurrenceKeys(tx, normalizedRows);
+      const prepared = normalizedRows.map((row) => {
+        const wantedType = row.type === TransactionType.EXPENSE ? CategoryType.EXPENSE : CategoryType.INCOME;
+        const mappedCategoryId = row.categoryId ? idMap.categories.get(row.categoryId) ?? row.categoryId : null;
+        const category =
+          usableFor(mappedCategoryId ? byId.get(mappedCategoryId) : undefined, wantedType) ??
+          usableFor(byNameType.get(`${row.categoryName}|${wantedType}`), wantedType) ??
+          usableFor(byNameType.get(`${row.categoryName}|${CategoryType.BOTH}`), wantedType) ??
+          fallbackCategory;
 
-      for (const row of normalizedRows) {
-        const wantedType = row.type === "EXPENSE" ? CategoryType.EXPENSE : CategoryType.INCOME;
-        const byId = row.categoryId ? index.byId.get(row.categoryId) : undefined;
-        const byName = index.byNameType.get(`${row.categoryName}|${wantedType}`) ?? index.byNameType.get(`${row.categoryName}|${CategoryType.BOTH}`);
-        const category = (body.backup ? undefined : activeOrUndefined(byId)) ?? activeOrUndefined(byName);
-        if (row.subscriptionId && !(await tx.subscription.findUnique({ where: { id: row.subscriptionId }, select: { id: true } }))) {
+        const subscriptionId = row.subscriptionId ? idMap.subscriptions.get(row.subscriptionId) ?? row.subscriptionId : null;
+        if (subscriptionId && !knownSubscriptionIds.has(subscriptionId)) {
           throw conflict(`账目关联的订阅不存在：${row.subscriptionId}`);
         }
-        const data = {
+        const subscriptionMonth = subscriptionId ? row.subscriptionMonth ?? monthStart(monthKey(row.occurredOn)) : null;
+        // Rebuilt rather than trusted: remapping a subscription invalidates an
+        // imported "<subscriptionId>:<month>" key, and the format must stay in
+        // sync with syncSubscriptions().
+        const occurrenceKey =
+          subscriptionId && subscriptionMonth && row.source === "SUBSCRIPTION" ? `${subscriptionId}:${monthKey(subscriptionMonth)}` : null;
+
+        const data: Prisma.TransactionCreateManyInput = {
           type: row.type,
           amountCents: row.amountCents,
           occurredOn: row.occurredOn,
-          categoryId: category?.id ?? expenseFallback.id,
+          categoryId: category.id,
           note: row.note,
-          source: row.source,
-          subscriptionId: row.subscriptionId,
-          subscriptionMonth: row.subscriptionMonth,
-          subscriptionOccurrenceKey: row.subscriptionOccurrenceKey,
+          source: subscriptionId ? row.source : "MANUAL",
+          subscriptionId,
+          subscriptionMonth,
+          subscriptionOccurrenceKey: occurrenceKey,
           deletedAt: row.deletedAt,
         };
-        if (row.externalId) await tx.transaction.upsert({ where: { id: row.externalId }, create: { id: row.externalId, ...data }, update: data });
-        else await tx.transaction.create({ data });
-        imported += 1;
+        return { data, externalId: restoringBackup ? row.externalId : null };
+      });
+
+      // Map every wanted occurrence key to the transaction id that will own it.
+      const wantedKeys = new Map<string, string | null>();
+      for (const item of prepared) {
+        const key = item.data.subscriptionOccurrenceKey;
+        if (key) wantedKeys.set(key, item.externalId);
       }
-    });
+      const takenKeys = await reconcileOccurrenceKeys(tx, wantedKeys);
+
+      const inserts: Prisma.TransactionCreateManyInput[] = [];
+      const seenKeys = new Set<string>();
+      for (const item of prepared) {
+        const key = item.data.subscriptionOccurrenceKey;
+        // The occurrence is already on the ledger (or earlier in this payload):
+        // skip instead of failing the restore or double-counting the expense.
+        if (key && (takenKeys.has(key) || seenKeys.has(key))) continue;
+        if (key) seenKeys.add(key);
+        if (item.externalId) {
+          await tx.transaction.upsert({
+            where: { id: item.externalId },
+            create: { id: item.externalId, ...item.data },
+            update: item.data,
+          });
+          imported += 1;
+        } else {
+          inserts.push(item.data);
+        }
+      }
+      if (inserts.length) {
+        const result = await tx.transaction.createMany({ data: inserts });
+        imported += result.count;
+      }
+
+    }, IMPORT_TRANSACTION_OPTIONS);
 
     return NextResponse.json({ imported });
   } catch (error) {
     return handleApiError(error);
   }
-}
-
-function activeOrUndefined<T extends { archivedAt: Date | null }>(category: T | undefined): T | undefined {
-  return category && category.archivedAt === null ? category : undefined;
 }

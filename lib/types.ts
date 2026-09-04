@@ -32,8 +32,6 @@ export type DashboardDTO = {
   incomeCents: number;
   remainingCents: number | null;
   usagePercent: number | null;
-  todayExpenseCents: number;
-  todayIncomeCents: number;
   focusDateExpenseCents: number;
   focusDateIncomeCents: number;
   transactionCount: number;
