@@ -56,8 +56,11 @@ model Transaction {
   createdAt                 DateTime          @default(now())
   updatedAt                 DateTime          @updatedAt
 
-  @@index([occurredOn, deletedAt])
+  // deletedAt leads: reads filter it by equality, then range/sort on occurredOn.
+  @@index([deletedAt, occurredOn])
   @@index([categoryId, occurredOn])
+  // Supports the FK, which PostgreSQL does not index on its own.
+  @@index([subscriptionId])
 }
 
 model Subscription {
