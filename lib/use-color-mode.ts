@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { readStoredColorMode, schemeForMode, storeColorMode, systemPrefersDark, type ColorMode } from "@/lib/theme";
+import { readStoredColorMode, schemeForMode, storeColorMode, type ColorMode } from "@/lib/theme";
 
 /**
  * Single source of truth for the color mode. Mirrors the boot script in
@@ -36,5 +36,5 @@ export function useColorMode() {
     storeColorMode(next);
   }, []);
 
-  return { mode, setMode: setModeAndStore, hydrated, systemDark: systemPrefersDark() };
+  return { mode, setMode: setModeAndStore, hydrated };
 }

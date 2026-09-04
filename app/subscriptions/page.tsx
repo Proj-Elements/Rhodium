@@ -7,7 +7,7 @@ import { SubscriptionForm } from "@/components/subscription-form";
 import { Toast, useFlash } from "@/components/toast";
 import { apiFetch, errorMessage } from "@/lib/api-client";
 import { getCategoryColor } from "@/lib/category-colors";
-import { addMonths, billingDate, formatMoney, todayInShanghai } from "@/lib/domain";
+import { addMonths, billingDate, dateOnlyKey, formatMoney, todayInShanghai } from "@/lib/domain";
 import { CategoryDTO, SubscriptionDTO } from "@/lib/types";
 
 type SubscriptionFilter = "all" | "active" | "paused";
@@ -17,15 +17,24 @@ function monthLabel(value: string) {
   return `${year} / ${month}`;
 }
 
+/**
+ * Label for the next charge. All comparisons go through YYYY-MM / YYYY-MM-DD
+ * keys derived with `dateOnlyKey`, so a subscription that starts or ends in the
+ * current month is classified the same way the server plans occurrences.
+ */
 function nextBillingLabel(subscription: SubscriptionDTO, today: string) {
   if (!subscription.active) return "已暂停";
   const currentMonth = today.slice(0, 7);
-  if (subscription.startMonth.slice(0, 7) > currentMonth) return `${monthLabel(subscription.startMonth.slice(0, 7))} 开始`;
-  if (subscription.endMonth && subscription.endMonth.slice(0, 7) < currentMonth) return "已结束";
-  const currentDueDate = billingDate(currentMonth, subscription.billingDay).toISOString().slice(0, 10);
-  const dueDate = currentDueDate >= today ? billingDate(currentMonth, subscription.billingDay) : billingDate(addMonths(currentMonth, 1), subscription.billingDay);
-  if (subscription.endMonth && dueDate.toISOString().slice(0, 7) > subscription.endMonth.slice(0, 7)) return "已结束";
-  return `${dueDate.toISOString().slice(5, 7)} / ${dueDate.toISOString().slice(8, 10)}`;
+  const startMonth = subscription.startMonth.slice(0, 7);
+  const endMonth = subscription.endMonth ? subscription.endMonth.slice(0, 7) : null;
+  if (startMonth > currentMonth) return `${monthLabel(startMonth)} 开始`;
+  if (endMonth && endMonth < currentMonth) return "已结束";
+
+  const currentDue = billingDate(currentMonth, subscription.billingDay);
+  const dueDate = dateOnlyKey(currentDue) >= today ? currentDue : billingDate(addMonths(currentMonth, 1), subscription.billingDay);
+  const dueKey = dateOnlyKey(dueDate);
+  if (endMonth && dueKey.slice(0, 7) > endMonth) return "已结束";
+  return `${dueKey.slice(5, 7)} / ${dueKey.slice(8, 10)}`;
 }
 
 export default function SubscriptionsPage() {

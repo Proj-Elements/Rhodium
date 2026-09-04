@@ -4,7 +4,7 @@ import { handleApiError, parseJsonBody, jsonError } from "@/lib/api";
 import { moneyToCents, monthKey, parseDateOnly } from "@/lib/domain";
 import { conflict, notFound } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
-import { transactionSchema } from "@/lib/validation";
+import { transactionSchema, restoreSchema } from "@/lib/validation";
 import { serializeTransaction } from "@/lib/serializers";
 import { isMonthLocked } from "@/lib/summary";
 
@@ -16,10 +16,15 @@ export async function PATCH(request: Request, { params }: Context) {
   try {
     const { id } = await params;
     const body = await parseJsonBody(request);
-    const existing = await prisma.transaction.findUnique({ where: { id }, select: { occurredOn: true } });
+    const existing = await prisma.transaction.findUnique({ where: { id }, select: { occurredOn: true, deletedAt: true } });
     if (!existing) throw notFound("账目不存在");
     if (await isMonthLocked(monthKey(existing.occurredOn))) throw conflict("本月已经结算，请先重新打开本月");
-    if (body.restore === true) {
+
+    // Restore is its own strict body so it cannot smuggle other fields past
+    // transactionSchema, and it only applies to a soft-deleted row.
+    const restore = restoreSchema.safeParse(body);
+    if (restore.success) {
+      if (!existing.deletedAt) throw conflict("这条账目没有被删除，无需恢复");
       const restored = await prisma.transaction.update({
         where: { id },
         data: { deletedAt: null },
@@ -27,6 +32,7 @@ export async function PATCH(request: Request, { params }: Context) {
       });
       return NextResponse.json({ transaction: serializeTransaction(restored) });
     }
+
     const parsed = transactionSchema.parse(body);
     const occurredOn = parseDateOnly(parsed.occurredOn);
     if (await isMonthLocked(parsed.occurredOn.slice(0, 7))) throw conflict("目标月份已经结算，请先重新打开本月");

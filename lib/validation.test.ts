@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backupSchema, categoryPatchSchema, importSchema, subscriptionSchema, transactionSchema } from "@/lib/validation";
+import { backupSchema, categoryPatchSchema, importSchema, restoreSchema, subscriptionSchema, transactionSchema } from "@/lib/validation";
 
 /** Shaped exactly like GET /api/export?format=json, extra columns included. */
 const exportedBackup = {
@@ -85,5 +85,12 @@ describe("other request schemas", () => {
   it("requires at least one field on a category patch", () => {
     expect(() => categoryPatchSchema.parse({})).toThrow();
     expect(categoryPatchSchema.parse({ archived: true }).archived).toBe(true);
+  });
+
+  it("accepts only a bare restore flag", () => {
+    expect(restoreSchema.parse({ restore: true }).restore).toBe(true);
+    expect(restoreSchema.safeParse({ restore: false }).success).toBe(false);
+    expect(restoreSchema.safeParse({ restore: true, amount: "999" }).success).toBe(false);
+    expect(restoreSchema.safeParse({}).success).toBe(false);
   });
 });

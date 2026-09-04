@@ -20,6 +20,8 @@ export async function POST(_request: Request, { params }: Context) {
       where: { month: monthStart(month) },
       create: {
         month: monthStart(month),
+        // A month with no budget at all settles with 0 and a null remaining, which
+        // stays distinguishable from a real 0 budget (remaining would be 0 there).
         budgetAmountCents: summary.budgetCents ?? 0,
         expenseAmountCents: summary.expenseCents,
         incomeAmountCents: summary.incomeCents,

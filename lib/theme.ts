@@ -32,11 +32,6 @@ export function systemPrefersDark(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
-/** The scheme actually applied for a mode right now (used for UI labels). */
-export function resolvedScheme(mode: ColorMode): "light" | "dark" {
-  return mode === "system" ? (systemPrefersDark() ? "dark" : "light") : mode;
-}
-
 /** Map a mode to the html[data-color-scheme] value ("light" | "dark"). */
 export function schemeForMode(mode: ColorMode): "light" | "dark" {
   return mode === "system" ? (systemPrefersDark() ? "dark" : "light") : mode;

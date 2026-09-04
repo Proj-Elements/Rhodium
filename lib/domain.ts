@@ -43,22 +43,13 @@ export function monthKey(value: Date): string {
   return value.toISOString().slice(0, 7);
 }
 
-/**
- * Canonical month-to-Date converter (first day of month, UTC).
- * `monthStart` remains as the preferred alias; `monthDate` is kept temporarily
- * and deprecated.
- * @deprecated use `monthStart`
- */
-export function monthDate(month: string): Date {
-  return parseMonth(month);
-}
-
 export function addMonths(month: string, offset: number): string {
   const date = parseMonth(month);
   date.setUTCMonth(date.getUTCMonth() + offset);
   return monthKey(date);
 }
 
+/** Canonical month-to-Date converter (first day of month, UTC). */
 export function monthStart(month: string): Date {
   return parseMonth(month);
 }
@@ -114,9 +105,4 @@ export function calculateUsage(budgetCents: number | null, expenseCents: number)
 
 export function dateLabel(value: string): string {
   return weekdayDateFormatter.format(parseDateOnly(value));
-}
-
-export function clampText(value: string | null | undefined, fallback = "未填写备注"): string {
-  const text = value?.trim();
-  return text || fallback;
 }

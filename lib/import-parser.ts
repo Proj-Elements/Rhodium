@@ -123,7 +123,10 @@ export function normalizeRow(row: Row): NormalizedRow {
   };
 }
 
-/** Cheap per-row validation for the preview endpoint (no Date construction). */
+/**
+ * Per-row validation for the preview endpoint: same date/amount/type rules as
+ * `normalizeRow` but without building the full domain object.
+ */
 export function validateRowShallow(row: Row): void {
   const dateText = String(value(row, "occurredOn", "日期") ?? "");
   parseDateOnly(dateText);

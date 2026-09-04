@@ -33,6 +33,9 @@ export const transactionSchema = z.object({
   note: z.string().max(200).optional().nullable(),
 });
 
+/** Restore-only body for PATCH /api/transactions/[id]; nothing else may ride along. */
+export const restoreSchema = z.object({ restore: z.literal(true) }).strict();
+
 export const budgetSchema = z.object({
   amount: amountValue,
 });
