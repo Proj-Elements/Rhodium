@@ -58,6 +58,11 @@ export const subscriptionToggleSchema = z
   .object({ active: z.boolean() })
   .strict();
 
+/** Restore-only PATCH body for a soft-deleted transaction ({ restore: true }). */
+export const transactionRestoreSchema = z
+  .object({ restore: z.literal(true) })
+  .strict();
+
 export const categorySchema = z.object({
   name: z.string().trim().min(1).max(30),
   type: z.enum(["expense", "income", "both"]).default("expense"),

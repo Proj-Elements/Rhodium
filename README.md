@@ -7,6 +7,7 @@
 ```bash
 npm install
 cp .env.example .env
+# 编辑 .env，把 POSTGRES_PASSWORD 与 DATABASE_URL 里的密码改成同一个值
 docker compose up -d db
 npx prisma migrate deploy
 npm run dev
@@ -21,6 +22,18 @@ docker compose up -d --build
 ```
 
 应用容器会在启动时自动执行 Prisma migrations。PostgreSQL 数据保存在 `yueyu-postgres` named volume 中。
+
+数据库口令来自 `.env` 的 `POSTGRES_PASSWORD`（未设置时 compose 会直接报错，不再回落到仓库里的默认口令）。两个服务的端口都只绑定 `127.0.0.1`，应用进程以非 root 的 `node` 用户运行。
+
+## 安全边界
+
+**这是单人本地账本，服务端没有任何登录或鉴权：任何能访问端口的人都能读写、导出、清空全部账目。**
+
+- 不要把 `3030` 或 `5432` 暴露到公网或不受信任的局域网；如需远程访问，请放在带认证的反向代理（或 VPN）之后。
+- `/api/*` 有基于进程内存的简易限流（读 600/分钟、写 120/分钟、导入 12/分钟），只用于兜住失控的重试循环，不是防护措施。
+- 响应头包含 CSP、`X-Frame-Options`、`Referrer-Policy` 等基础加固，API 响应统一 `Cache-Control: no-store`。
+- 请求体上限为 256 KB，导入接口 8 MB；超出返回 413。
+- `/api/export` 会导出全部账目（CSV 已做公式注入转义），请自行保管导出文件。
 
 ## 验证
 

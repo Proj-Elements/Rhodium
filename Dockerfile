@@ -26,11 +26,13 @@ ENV PORT=3030
 # its build assets and engines) is added only for `migrate deploy` at startup.
 # Run the CLI via its real package entrypoint: the .bin shim would resolve the
 # schema wasm relative to .bin/ and fail.
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
-COPY --from=builder /app/prisma ./prisma
-COPY --from=deps /app/node_modules/prisma ./node_modules/prisma
-COPY --from=deps /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+COPY --from=builder --chown=node:node /app/public ./public
+COPY --from=builder --chown=node:node /app/prisma ./prisma
+COPY --from=deps --chown=node:node /app/node_modules/prisma ./node_modules/prisma
+COPY --from=deps --chown=node:node /app/node_modules/@prisma ./node_modules/@prisma
+# Drop root: the runtime only reads the bundle and talks to Postgres.
+USER node
 EXPOSE 3030
 CMD ["sh", "-c", "node ./node_modules/prisma/build/index.js migrate deploy && node server.js"]

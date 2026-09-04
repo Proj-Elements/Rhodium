@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handleApiError, parseJsonBody } from "@/lib/api";
+import { handleApiError, MAX_IMPORT_BODY_BYTES, parseJsonBody } from "@/lib/api";
 import {
   normalizeRow,
   parseBoolean,
@@ -114,7 +114,7 @@ async function importBackup(tx: Tx, backup: Row, categoryIdMap: Map<string, stri
 
 export async function POST(request: Request) {
   try {
-    const body = importSchema.parse(await parseJsonBody(request));
+    const body = importSchema.parse(await parseJsonBody(request, MAX_IMPORT_BODY_BYTES));
 
     // Parse + validate every row up front so failures happen before any write.
     let normalizedRows: NormalizedRow[];

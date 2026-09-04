@@ -4,7 +4,7 @@ import { handleApiError, parseJsonBody, jsonError } from "@/lib/api";
 import { moneyToCents, monthKey, parseDateOnly } from "@/lib/domain";
 import { conflict, notFound } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
-import { transactionSchema } from "@/lib/validation";
+import { transactionRestoreSchema, transactionSchema } from "@/lib/validation";
 import { serializeTransaction } from "@/lib/serializers";
 import { isMonthLocked } from "@/lib/summary";
 
@@ -19,7 +19,7 @@ export async function PATCH(request: Request, { params }: Context) {
     const existing = await prisma.transaction.findUnique({ where: { id }, select: { occurredOn: true } });
     if (!existing) throw notFound("账目不存在");
     if (await isMonthLocked(monthKey(existing.occurredOn))) throw conflict("本月已经结算，请先重新打开本月");
-    if (body.restore === true) {
+    if (transactionRestoreSchema.safeParse(body).success) {
       const restored = await prisma.transaction.update({
         where: { id },
         data: { deletedAt: null },
