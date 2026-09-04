@@ -54,7 +54,7 @@ export default function TransactionsPage() {
     setError("");
     try {
       const [transactionResult, categoryResult] = await Promise.all([
-        apiFetch<TransactionsPayload>(`/api/transactions?month=${month}&type=${filter === "all" ? "" : filter}`, { signal }),
+        apiFetch<TransactionsPayload>(`/api/transactions?month=${month}`, { signal }),
         apiFetch<{ categories: CategoryDTO[] }>("/api/categories", { signal }),
       ]);
       setTransactions(transactionResult.transactions || []);
@@ -79,10 +79,7 @@ export default function TransactionsPage() {
     // resolved month, so the initial load still costs one request instead of two.
     if (!deepLinkHandled.current) {
       deepLinkHandled.current = true;
-      const params = new URLSearchParams(window.location.search);
-      const requestedMonth = params.get("month");
-      // Clear the one-shot param so a refresh does not snap back to the deep-linked month.
-      if (params.toString()) window.history.replaceState(null, "", window.location.pathname);
+      const requestedMonth = new URLSearchParams(window.location.search).get("month");
       setMonth(requestedMonth && MONTH_PATTERN.test(requestedMonth) ? requestedMonth : todayInShanghai().slice(0, 7));
       return;
     }
@@ -90,8 +87,16 @@ export default function TransactionsPage() {
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month/filter change
-  }, [month, filter, reloadToken]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month change
+  }, [month, reloadToken]);
+
+  // Keep ?month= in sync so the view survives a refresh and can be shared. replaceState
+  // instead of push: arrow-clicking through months should not fill the back stack.
+  useEffect(() => {
+    if (!month) return;
+    const search = `?month=${month}`;
+    if (window.location.search !== search) window.history.replaceState(null, "", `${window.location.pathname}${search}`);
+  }, [month]);
 
   // "记一笔" in the app chrome hands the intent over in memory, so it works even
   // when the user is already here and no navigation happens.
@@ -136,16 +141,19 @@ export default function TransactionsPage() {
     }
   }
 
+  // The type tabs filter the month that is already in memory — switching them used to
+  // refetch the whole month from the server for no new data.
   const visibleTransactions = useMemo(() => {
     const query = search.trim().toLowerCase();
     return transactions.filter((transaction) => {
+      if (filter !== "all" && transaction.type !== (filter === "expense" ? "EXPENSE" : "INCOME")) return false;
       const matchesCategory = categoryFilter === "all" || transaction.category.id === categoryFilter;
       if (!matchesCategory) return false;
       if (!query) return true;
       const haystack = [transaction.note || "", transaction.category.name, transaction.subscription?.name || ""].join(" ").toLowerCase();
       return haystack.includes(query);
     });
-  }, [transactions, search, categoryFilter]);
+  }, [transactions, search, categoryFilter, filter]);
 
   const grouped = useMemo<DateGroup[]>(() => {
     const groups = new Map<string, DateGroup>();
@@ -166,6 +174,7 @@ export default function TransactionsPage() {
   }, { expenseCents: 0, incomeCents: 0 }), [visibleTransactions]);
 
   const activeCategories = categories.filter((category) => !category.archivedAt);
+  const filtering = Boolean(search) || categoryFilter !== "all" || filter !== "all";
   const today = todayInShanghai();
   const defaultEntryDate = !month || month === today.slice(0, 7) ? today : `${month}-01`;
 
@@ -191,8 +200,8 @@ export default function TransactionsPage() {
     </div>
 
     <div className="ledger-summary">
-      <div className="summary-chip expense"><span>{search || categoryFilter !== "all" ? "筛选后支出" : "本月支出"}</span><strong>{formatMoney(totals.expenseCents)}</strong></div>
-      <div className="summary-chip income"><span>{search || categoryFilter !== "all" ? "筛选后收入" : "本月收入"}</span><strong>+{formatMoney(totals.incomeCents)}</strong></div>
+      <div className="summary-chip expense"><span>{filtering ? "筛选后支出" : "本月支出"}</span><strong>{formatMoney(totals.expenseCents)}</strong></div>
+      <div className="summary-chip income"><span>{filtering ? "筛选后收入" : "本月收入"}</span><strong>+{formatMoney(totals.incomeCents)}</strong></div>
       <div className="summary-chip"><span>已显示</span><strong>{visibleTransactions.length} 笔</strong></div>
     </div>
 

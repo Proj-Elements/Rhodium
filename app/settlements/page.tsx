@@ -105,7 +105,6 @@ export default function SettlementsPage() {
     if (!deepLinkHandled.current) {
       deepLinkHandled.current = true;
       const requestedMonth = new URLSearchParams(window.location.search).get("month");
-      if (window.location.search) window.history.replaceState(null, "", window.location.pathname);
       setMonth(requestedMonth && MONTH_PATTERN.test(requestedMonth) ? requestedMonth : todayInShanghai().slice(0, 7));
       return;
     }
@@ -131,6 +130,14 @@ export default function SettlementsPage() {
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month change
   }, [month, reloadToken]);
+
+  // Keep ?month= in sync so the view survives a refresh and can be shared. replaceState
+  // instead of push: arrow-clicking through months should not fill the back stack.
+  useEffect(() => {
+    if (!month) return;
+    const search = `?month=${month}`;
+    if (window.location.search !== search) window.history.replaceState(null, "", `${window.location.pathname}${search}`);
+  }, [month]);
 
   async function settle() {
     if (!status || status === "future" || busy) return;
