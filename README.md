@@ -56,4 +56,6 @@ npm run test:db
 
 集成测试会 `TRUNCATE` 所有表，**不要指向真实数据库**。
 
+以上全部命令都由 `.github/workflows/ci.yml` 在每次 push 与 pull request 上跑一遍，集成测试在 CI 里使用一次性的 postgres service 容器。
+
 应用默认使用人民币、中文界面和 `Asia/Shanghai` 时区。首版是单人本地账本，不包含登录、多人共享、银行同步或多币种。
