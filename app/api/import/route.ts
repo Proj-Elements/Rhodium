@@ -15,13 +15,24 @@ import { conflict } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultCategories } from "@/lib/seed";
 import { importSchema } from "@/lib/validation";
-import { isMonthLocked } from "@/lib/summary";
+import { getLockedMonths } from "@/lib/summary";
 import { CategoryType, type Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
 type Row = Record<string, unknown>;
 type Tx = Prisma.TransactionClient;
+
+const CREATE_CHUNK = 500;
+const UPSERT_CHUNK = 25;
+/** A 5000-row import cannot finish inside Prisma's 5s interactive default. */
+const IMPORT_TRANSACTION_OPTIONS = { timeout: 120_000, maxWait: 15_000 } as const;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const batches: T[][] = [];
+  for (let index = 0; index < items.length; index += size) batches.push(items.slice(index, index + size));
+  return batches;
+}
 
 /**
  * Collect all unique subscriptionOccurrenceKeys a row set would write, then
@@ -125,11 +136,7 @@ export async function POST(request: Request) {
     }
 
     const months = [...new Set(normalizedRows.map((row) => `${row.occurredOn.toISOString().slice(0, 7)}`))];
-    const lockedMonths = (
-      await Promise.all(months.map(async (month) => ({ month, locked: await isMonthLocked(month) })))
-    )
-      .filter((item) => item.locked)
-      .map((item) => item.month);
+    const lockedMonths = await getLockedMonths(months);
     if (lockedMonths.length) throw conflict(`${lockedMonths.join("、")} 已结算，请先重新打开后再导入`);
 
     await ensureDefaultCategories();
@@ -152,12 +159,23 @@ export async function POST(request: Request) {
 
       await dedupeOccurrenceKeys(tx, normalizedRows);
 
+      // One lookup for every referenced subscription instead of one per row.
+      const wantedSubscriptionIds = [...new Set(normalizedRows.map((row) => row.subscriptionId).filter((id): id is string => Boolean(id)))];
+      const knownSubscriptionIds = new Set(
+        wantedSubscriptionIds.length
+          ? (await tx.subscription.findMany({ where: { id: { in: wantedSubscriptionIds } }, select: { id: true } })).map((item) => item.id)
+          : [],
+      );
+
+      const freshRows: Prisma.TransactionCreateManyInput[] = [];
+      const keyedRows: { id: string; data: Omit<Prisma.TransactionCreateManyInput, "id"> }[] = [];
+
       for (const row of normalizedRows) {
         const wantedType = row.type === "EXPENSE" ? CategoryType.EXPENSE : CategoryType.INCOME;
         const byId = row.categoryId ? index.byId.get(row.categoryId) : undefined;
         const byName = index.byNameType.get(`${row.categoryName}|${wantedType}`) ?? index.byNameType.get(`${row.categoryName}|${CategoryType.BOTH}`);
         const category = (body.backup ? undefined : activeOrUndefined(byId)) ?? activeOrUndefined(byName);
-        if (row.subscriptionId && !(await tx.subscription.findUnique({ where: { id: row.subscriptionId }, select: { id: true } }))) {
+        if (row.subscriptionId && !knownSubscriptionIds.has(row.subscriptionId)) {
           throw conflict(`账目关联的订阅不存在：${row.subscriptionId}`);
         }
         const data = {
@@ -172,11 +190,22 @@ export async function POST(request: Request) {
           subscriptionOccurrenceKey: row.subscriptionOccurrenceKey,
           deletedAt: row.deletedAt,
         };
-        if (row.externalId) await tx.transaction.upsert({ where: { id: row.externalId }, create: { id: row.externalId, ...data }, update: data });
-        else await tx.transaction.create({ data });
-        imported += 1;
+        // Rows carrying an id must keep upsert semantics: delete+create would
+        // reset createdAt, which the transaction list uses as a tiebreaker.
+        if (row.externalId) keyedRows.push({ id: row.externalId, data });
+        else freshRows.push(data);
       }
-    });
+
+      for (const batch of chunk(freshRows, CREATE_CHUNK)) {
+        await tx.transaction.createMany({ data: batch });
+      }
+      for (const batch of chunk(keyedRows, UPSERT_CHUNK)) {
+        await Promise.all(
+          batch.map((row) => tx.transaction.upsert({ where: { id: row.id }, create: { id: row.id, ...row.data }, update: row.data })),
+        );
+      }
+      imported = freshRows.length + keyedRows.length;
+    }, IMPORT_TRANSACTION_OPTIONS);
 
     return NextResponse.json({ imported });
   } catch (error) {

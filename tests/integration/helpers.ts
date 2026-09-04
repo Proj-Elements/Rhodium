@@ -1,6 +1,7 @@
 import { CategoryType, TransactionType } from "@prisma/client";
 import { parseDateOnly } from "@/lib/domain";
 import { prisma } from "@/lib/prisma";
+import { resetSeedCache } from "@/lib/seed";
 import { resetSubscriptionSyncCache } from "@/lib/subscriptions";
 
 const TABLES = ["Transaction", "Subscription", "MonthlyBudget", "BudgetPreset", "MonthlySettlement", "Category"]
@@ -10,6 +11,7 @@ const TABLES = ["Transaction", "Subscription", "MonthlyBudget", "BudgetPreset", 
 /** Empty every table and drop process-local caches that outlive a test. */
 export async function resetDatabase() {
   await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${TABLES} RESTART IDENTITY CASCADE`);
+  resetSeedCache();
   resetSubscriptionSyncCache();
 }
 

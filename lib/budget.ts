@@ -1,4 +1,4 @@
-import { monthStart } from "@/lib/domain";
+import { monthKey, monthStart } from "@/lib/domain";
 import { prisma } from "@/lib/prisma";
 
 /** The single-row preset: default budget for months without an explicit one. */
@@ -32,4 +32,32 @@ export async function resolveBudget(month: string): Promise<{ amountCents: numbe
 /** Effective budget in cents, or null when neither a month row nor a preset is set. */
 export async function resolveBudgetCents(month: string): Promise<number | null> {
   return (await resolveBudget(month)).amountCents;
+}
+
+export type ResolvedBudget = { amountCents: number | null; source: BudgetSource };
+
+const NO_BUDGET: ResolvedBudget = { amountCents: null, source: "none" };
+
+/**
+ * Batch form of `resolveBudget`: two queries for any number of months, so
+ * multi-month views (the settlements page) don't issue a pair per month.
+ */
+export async function resolveBudgets(months: string[]): Promise<Map<string, ResolvedBudget>> {
+  const unique = [...new Set(months)];
+  if (!unique.length) return new Map();
+  const [rows, preset] = await Promise.all([
+    prisma.monthlyBudget.findMany({
+      where: { month: { in: unique.map(monthStart) } },
+      select: { month: true, amountCents: true },
+    }),
+    getBudgetPreset(),
+  ]);
+  const explicit = new Map(rows.map((row) => [monthKey(row.month), row.amountCents]));
+  const fallback: ResolvedBudget = preset === null ? NO_BUDGET : { amountCents: preset, source: "preset" };
+  return new Map(
+    unique.map((month) => {
+      const amountCents = explicit.get(month);
+      return [month, amountCents === undefined ? fallback : { amountCents, source: "month" }];
+    }),
+  );
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { handleApiError } from "@/lib/api";
 import { addMonths, parseMonth, todayInShanghai } from "@/lib/domain";
-import { getMonthSummary } from "@/lib/summary";
+import { getMonthSummaries } from "@/lib/summary";
 import { syncSubscriptions } from "@/lib/subscriptions";
 
 export const dynamic = "force-dynamic";
@@ -16,10 +16,9 @@ export async function GET(request: Request) {
     const includeFocus = url.searchParams.get("include") === "focus";
     await syncSubscriptions();
     const months = Array.from({ length: 6 }, (_, index) => addMonths(end, index - 5));
-    const [summaries, focus] = await Promise.all([
-      Promise.all(months.map(getMonthSummary)),
-      includeFocus ? getMonthSummary(end) : Promise.resolve(null),
-    ]);
+    const summaries = await getMonthSummaries(months);
+    // `end` is the last element, so focus reuses it instead of recomputing.
+    const focus = summaries[summaries.length - 1] ?? null;
     return NextResponse.json({ summaries, ...(includeFocus ? { focus } : {}) });
   } catch (error) {
     return handleApiError(error);

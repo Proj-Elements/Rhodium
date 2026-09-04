@@ -18,19 +18,23 @@ export async function GET(request: Request) {
     const month = url.searchParams.get("month") || todayInShanghai().slice(0, 7);
     parseMonth(month);
     const type = url.searchParams.get("type");
-    await ensureDefaultCategories();
-    await syncSubscriptions();
+    // Seeding and subscription materialisation are independent of each other but
+    // both must land before the rows are read.
+    await Promise.all([ensureDefaultCategories(), syncSubscriptions()]);
     const { start, nextStart } = monthRange(month);
-    const transactions = await prisma.transaction.findMany({
-      where: {
-        deletedAt: null,
-        occurredOn: { gte: start, lt: nextStart },
-        ...(type === "expense" || type === "income" ? { type: type === "expense" ? TransactionType.EXPENSE : TransactionType.INCOME } : {}),
-      },
-      include: { category: true, subscription: { select: { name: true } } },
-      orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }],
-    });
-    return NextResponse.json({ month, readOnly: await isMonthLocked(month), transactions: transactions.map(serializeTransaction) });
+    const [transactions, readOnly] = await Promise.all([
+      prisma.transaction.findMany({
+        where: {
+          deletedAt: null,
+          occurredOn: { gte: start, lt: nextStart },
+          ...(type === "expense" || type === "income" ? { type: type === "expense" ? TransactionType.EXPENSE : TransactionType.INCOME } : {}),
+        },
+        include: { category: true, subscription: { select: { name: true } } },
+        orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }],
+      }),
+      isMonthLocked(month),
+    ]);
+    return NextResponse.json({ month, readOnly, transactions: transactions.map(serializeTransaction) });
   } catch (error) {
     return handleApiError(error);
   }
