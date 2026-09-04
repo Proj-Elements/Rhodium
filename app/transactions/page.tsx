@@ -23,8 +23,10 @@ type DateGroup = {
 
 type TransactionsPayload = { month: string; readOnly: boolean; transactions: TransactionDTO[] };
 
+const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+
 export default function TransactionsPage() {
-  const [month, setMonth] = useState(todayInShanghai().slice(0, 7));
+  const [month, setMonth] = useState(() => todayInShanghai().slice(0, 7));
   const [transactions, setTransactions] = useState<TransactionDTO[]>([]);
   const [categories, setCategories] = useState<CategoryDTO[]>([]);
   const [filter, setFilter] = useState<TransactionFilter>("all");
@@ -39,6 +41,7 @@ export default function TransactionsPage() {
   const [reloadToken, setReloadToken] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const undoTimer = useRef<number | null>(null);
+  const deepLinkHandled = useRef(false);
   const { message, flash } = useFlash();
 
   const reload = () => setReloadToken((token) => token + 1);
@@ -67,20 +70,31 @@ export default function TransactionsPage() {
   }
 
   useEffect(() => {
+    // The page is statically prerendered, so the deep link cannot be read during
+    // the first render without a hydration mismatch. Consume it here instead, and
+    // skip this pass when it changes the month: the effect immediately re-runs with
+    // the requested month, so a deep link costs one request instead of two.
+    if (!deepLinkHandled.current) {
+      deepLinkHandled.current = true;
+      const params = new URLSearchParams(window.location.search);
+      const requestedMonth = params.get("month");
+      if (params.get("new") === "1") setShowForm(true);
+      // Clear the one-shot params so a refresh does not reopen the form or snap
+      // back to the deep-linked month.
+      if (params.toString()) window.history.replaceState(null, "", window.location.pathname);
+      if (requestedMonth && MONTH_PATTERN.test(requestedMonth) && requestedMonth !== month) {
+        setMonth(requestedMonth);
+        return;
+      }
+    }
     const controller = new AbortController();
     void load(controller.signal);
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month/filter change
   }, [month, filter, reloadToken]);
 
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const requestedMonth = params.get("month");
-    if (requestedMonth && /^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth)) setMonth(requestedMonth);
-    if (params.get("new") === "1") setShowForm(true);
-    return () => {
-      if (undoTimer.current) window.clearTimeout(undoTimer.current);
-    };
+  useEffect(() => () => {
+    if (undoTimer.current) window.clearTimeout(undoTimer.current);
   }, []);
 
   async function remove(transaction: TransactionDTO) {

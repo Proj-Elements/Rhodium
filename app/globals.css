@@ -539,6 +539,10 @@ textarea.form-control { min-height: 82px; resize: vertical; }
 @media (max-width: 1150px) {
   .main-content { padding-right: 34px; padding-left: 34px; }
   .subscription-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* Four across left the stat cards narrower than their own mono amount, so the
+     figures clipped. Fold to the 2x2 arrangement already used below 900px. */
+  .dashboard-top { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .balance-card { grid-column: 1 / -1; }
 }
 
 @media (max-width: 900px) {
@@ -612,4 +616,16 @@ textarea.form-control { min-height: 82px; resize: vertical; }
   .inline-error { align-items: flex-start; flex-direction: column; }
   .modal-backdrop { place-items: start center; overflow-y: auto; padding: 12px; }
   .modal { max-height: calc(100vh - 24px); padding: 18px; }
+}
+
+/* Respect the OS "reduce motion" setting: drop the hover/width transitions and
+   collapse the loading spinner to a slow pulse instead of a continuous spin. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .loading::before { border-top-color: var(--orange); animation: none !important; }
 }

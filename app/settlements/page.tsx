@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { AppShell } from "@/components/app-shell";
 import { Icon } from "@/components/icon";
 import { MonthSwitcher } from "@/components/month-switcher";
@@ -77,20 +77,36 @@ function DailyCalendar({ month, days }: { month: string; days: Summary["dailyBre
   </div>;
 }
 
+const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+
 export default function SettlementsPage() {
-  const [month, setMonth] = useState(todayInShanghai().slice(0, 7));
+  const [month, setMonth] = useState(() => todayInShanghai().slice(0, 7));
   const [summary, setSummary] = useState<Summary | null>(null);
   const [trend, setTrend] = useState<Summary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const deepLinkHandled = useRef(false);
   const { message, flash } = useFlash();
   const status = getStatus(month);
 
   const reload = () => setReloadToken((token) => token + 1);
 
   useEffect(() => {
+    // The page is statically prerendered, so `?month=` cannot be read during the
+    // first render without a hydration mismatch. Consume it here and skip this pass
+    // when it changes the month: the effect re-runs immediately with the requested
+    // month, so a deep link costs one request instead of two.
+    if (!deepLinkHandled.current) {
+      deepLinkHandled.current = true;
+      const requestedMonth = new URLSearchParams(window.location.search).get("month");
+      if (window.location.search) window.history.replaceState(null, "", window.location.pathname);
+      if (requestedMonth && MONTH_PATTERN.test(requestedMonth) && requestedMonth !== month) {
+        setMonth(requestedMonth);
+        return;
+      }
+    }
     const controller = new AbortController();
     async function load() {
       setLoading(true);
@@ -108,8 +124,6 @@ export default function SettlementsPage() {
         if (!controller.signal.aborted) setLoading(false);
       }
     }
-    const requestedMonth = new URLSearchParams(window.location.search).get("month");
-    if (requestedMonth && /^\d{4}-(0[1-9]|1[0-2])$/.test(requestedMonth)) setMonth(requestedMonth);
     void load();
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month change
