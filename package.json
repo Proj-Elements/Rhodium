@@ -6,7 +6,7 @@
     "dev": "next dev -p 3030",
     "build": "prisma generate && next build",
     "start": "next start -p 3030",
-    "lint": "next lint",
+    "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -20,12 +20,13 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@eslint/eslintrc": "^3.3.1",
     "@types/node": "22.20.1",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
-    "@typescript-eslint/eslint-plugin": "7.18.0",
-    "@typescript-eslint/parser": "7.18.0",
-    "eslint": "^8.57.1",
+    "@typescript-eslint/eslint-plugin": "^8.46.2",
+    "@typescript-eslint/parser": "^8.46.2",
+    "eslint": "^9.39.1",
     "eslint-config-next": "^15.5.25",
     "postcss": "^8.5.27",
     "typescript": "5.7.2",

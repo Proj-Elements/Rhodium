@@ -128,7 +128,6 @@ export default function SettlementsPage() {
     }
     void load();
     return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload only on month change
   }, [month, reloadToken]);
 
   // Keep ?month= in sync so the view survives a refresh and can be shared. replaceState
