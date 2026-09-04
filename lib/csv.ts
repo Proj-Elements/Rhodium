@@ -5,15 +5,23 @@
  */
 
 /**
- * Values starting with = + - @ are dangerous when they look like formulas
- * (e.g. "=SUM(A1)", "@cmd"). Ordinary numbers like "-5.20" are left alone.
+ * Spreadsheet formula/DDE injection guard.
+ *
+ * `= + @` and a leading TAB/CR always start a formula in Excel, LibreOffice and
+ * Google Sheets, so those are neutralized unconditionally. A leading `-` is
+ * ambiguous: "-5.20" is just a number, but "-cmd|' /C calc'!A0" is a DDE
+ * payload — so `-` is neutralized unless the whole value is a plain number.
+ *
+ * The previous version additionally required the value to contain `= + @` or a
+ * `name(` call, which let payloads like "-cmd|' /C calc'!A0" and "-1-1" through.
  */
-const FORMULA_PREFIX = /^[=+@-]/;
-const LOOKS_LIKE_FORMULA = /[=+@]|[A-Za-z]\(/;
+const ALWAYS_UNSAFE_PREFIX = /^[=+@\t\r]/;
+const PLAIN_NUMBER = /^-?\d+(?:\.\d+)?$/;
 
 function neutralizeFormula(value: string): string {
-  if (!FORMULA_PREFIX.test(value) || !LOOKS_LIKE_FORMULA.test(value)) return value;
-  return `'${value}`;
+  if (ALWAYS_UNSAFE_PREFIX.test(value)) return `'${value}`;
+  if (value.startsWith("-") && !PLAIN_NUMBER.test(value)) return `'${value}`;
+  return value;
 }
 
 export function csvEscape(value: unknown): string {

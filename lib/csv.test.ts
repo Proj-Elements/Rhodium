@@ -40,6 +40,18 @@ describe("formula injection guard", () => {
     expect(csvEscape("-5.20")).toBe('"-5.20"');
   });
 
+  it("neutralizes DDE payloads that contain no formula characters", () => {
+    // The old guard required = + @ or `name(` somewhere in the value, so these
+    // reached the spreadsheet as live formulas.
+    expect(csvEscape("-cmd|' /C calc'!A0")).toBe("\"'-cmd|' /C calc'!A0\"");
+    expect(csvEscape("-1-1")).toBe("\"'-1-1\"");
+  });
+
+  it("neutralizes leading tab and carriage return", () => {
+    expect(csvEscape("\t-1-1")).toBe('"\'\t-1-1"');
+    expect(csvEscape("\r@cmd")).toBe('"\'\r@cmd"');
+  });
+
   it("round-trips a formula-looking note as inert text", () => {
     const parsed = parseCsv(toCsv(["备注"], [["=SUM(A1)"]]));
     expect(parsed[0]["备注"]).toBe("'=SUM(A1)");
