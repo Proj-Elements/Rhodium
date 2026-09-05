@@ -76,10 +76,21 @@ export function syncSubscriptions(referenceDate = todayInShanghai()): Promise<Sy
   return promise;
 }
 
-/** Test-only: drop the cooldown cache so each case starts from a clean slate. */
-export function resetSubscriptionSyncCache() {
+/**
+ * Drop the cooldown cache so the next `syncSubscriptions()` actually runs.
+ * Must be called after any mutation that changes what a sync would write —
+ * subscription create/update/archive/delete and settlement reopen — otherwise
+ * a cached run from the last 60 seconds answers the route's own sync call and
+ * the mutation never materializes.
+ */
+export function invalidateSubscriptionSyncCache(): void {
   lastSync = null;
   inFlight = null;
+}
+
+/** Test-only: drop the cooldown cache so each case starts from a clean slate. */
+export function resetSubscriptionSyncCache() {
+  invalidateSubscriptionSyncCache();
 }
 
 async function runSync(referenceDate: string) {

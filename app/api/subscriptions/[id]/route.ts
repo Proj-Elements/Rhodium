@@ -3,7 +3,7 @@ import { handleApiError, parseJsonBody } from "@/lib/api";
 import { notFound } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { subscriptionSchema, subscriptionToggleSchema } from "@/lib/validation";
-import { assertExpenseCategory, subscriptionData, syncSubscriptions } from "@/lib/subscriptions";
+import { assertExpenseCategory, invalidateSubscriptionSyncCache, subscriptionData, syncSubscriptions } from "@/lib/subscriptions";
 import { serializeSubscription, subscriptionInclude } from "@/lib/subscription-serializer";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +26,9 @@ export async function PATCH(request: Request, { params }: Context) {
         data: { active: toggle.data.active },
         include: subscriptionInclude,
       });
+      // Any subscription mutation changes what a sync would write: bypass the
+      // cooldown cache so this call (and later reads) plan against new state.
+      invalidateSubscriptionSyncCache();
       await syncSubscriptions();
       return NextResponse.json({ subscription: serializeSubscription(subscription) });
     }
@@ -37,6 +40,7 @@ export async function PATCH(request: Request, { params }: Context) {
       data: subscriptionData(parsed),
       include: subscriptionInclude,
     });
+    invalidateSubscriptionSyncCache();
     await syncSubscriptions();
     return NextResponse.json({ subscription: serializeSubscription(subscription) });
   } catch (error) {
@@ -51,9 +55,11 @@ export async function DELETE(_request: Request, { params }: Context) {
     if (usage > 0) {
       // Keep the subscription for its historical ledger entries; just pause it.
       const subscription = await prisma.subscription.update({ where: { id }, data: { active: false }, include: subscriptionInclude });
+      invalidateSubscriptionSyncCache();
       return NextResponse.json({ subscription: serializeSubscription(subscription), archived: true });
     }
     await prisma.subscription.delete({ where: { id } });
+    invalidateSubscriptionSyncCache();
     return NextResponse.json({ id, deleted: true });
   } catch (error) {
     return handleApiError(error);

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { handleApiError, parseJsonBody } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
 import { subscriptionSchema } from "@/lib/validation";
-import { assertExpenseCategory, subscriptionData, syncSubscriptions } from "@/lib/subscriptions";
+import { assertExpenseCategory, invalidateSubscriptionSyncCache, subscriptionData, syncSubscriptions } from "@/lib/subscriptions";
 import { serializeSubscription, subscriptionInclude } from "@/lib/subscription-serializer";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +24,9 @@ export async function POST(request: Request) {
       data: subscriptionData(body),
       include: subscriptionInclude,
     });
+    // The new plan changes what a sync would write, so the cooldown cache must
+    // not answer this call with a run from before the row existed.
+    invalidateSubscriptionSyncCache();
     await syncSubscriptions();
     return NextResponse.json({ subscription: serializeSubscription(subscription) }, { status: 201 });
   } catch (error) {

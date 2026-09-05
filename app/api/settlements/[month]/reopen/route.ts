@@ -4,6 +4,7 @@ import { monthStart, parseMonth } from "@/lib/domain";
 import { conflict, notFound } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { serializeSettlement } from "@/lib/serializers";
+import { invalidateSubscriptionSyncCache } from "@/lib/subscriptions";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,9 @@ export async function POST(_request: Request, { params }: Context) {
     if (!existing) throw notFound("这个月还没有结算，无需重新打开");
     if (existing.reopenedAt) throw conflict("这个月已经是打开状态");
     const settlement = await prisma.monthlySettlement.update({ where: { month: monthStart(month) }, data: { reopenedAt: new Date() } });
+    // Occurrences skipped while the month was locked can now materialize, so a
+    // cached sync run must not keep answering with the pre-reopen plan.
+    invalidateSubscriptionSyncCache();
     return NextResponse.json({ settlement: serializeSettlement(settlement) });
   } catch (error) {
     return handleApiError(error);
