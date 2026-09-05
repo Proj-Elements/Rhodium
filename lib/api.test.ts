@@ -74,13 +74,16 @@ describe("handleApiError", () => {
     expect(body.details.fieldErrors).toHaveProperty("amount");
   });
 
-  it("maps Prisma P2025 to 404 and P2002 to 409", async () => {
+  it("maps Prisma P2025 to 404, P2002 to 409 and P2003 (fk in use) to 409", async () => {
     const missing = new Prisma.PrismaClientKnownRequestError("missing", { code: "P2025", clientVersion: "5" });
     const duplicate = new Prisma.PrismaClientKnownRequestError("duplicate", { code: "P2002", clientVersion: "5" });
+    const fkInUse = new Prisma.PrismaClientKnownRequestError("fk", { code: "P2003", clientVersion: "5" });
     expect(handleApiError(missing).status).toBe(404);
     expect(await handleApiError(missing).json()).toMatchObject({ error: "请求的数据不存在" });
     expect(handleApiError(duplicate).status).toBe(409);
     expect(await handleApiError(duplicate).json()).toMatchObject({ error: "数据已经存在" });
+    expect(handleApiError(fkInUse).status).toBe(409);
+    expect(await handleApiError(fkInUse).json()).toMatchObject({ error: "操作被拒绝：仍有账目关联该数据" });
   });
 
   it("hides unexpected failures behind a 500 and logs them once", async () => {
@@ -93,7 +96,7 @@ describe("handleApiError", () => {
 
   it("does not leak an unknown Prisma error code to the client", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const unknown = new Prisma.PrismaClientKnownRequestError("boom", { code: "P2003", clientVersion: "5" });
+    const unknown = new Prisma.PrismaClientKnownRequestError("boom", { code: "P2021", clientVersion: "5" });
     const response = handleApiError(unknown);
     expect(response.status).toBe(500);
     expect(await response.json()).toMatchObject({ error: "服务器暂时无法完成请求" });

@@ -18,6 +18,9 @@ export function handleApiError(error: unknown) {
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     if (error.code === "P2025") return jsonError("请求的数据不存在", 404);
     if (error.code === "P2002") return jsonError("数据已经存在", 409);
+    // A row another record still points at (e.g. a subscription deleted while
+    // a concurrent sync just wrote its ledger line) is a conflict, not a crash.
+    if (error.code === "P2003") return jsonError("操作被拒绝：仍有账目关联该数据", 409);
   }
   console.error(error);
   return jsonError("服务器暂时无法完成请求", 500);

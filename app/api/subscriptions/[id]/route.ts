@@ -51,15 +51,19 @@ export async function PATCH(request: Request, { params }: Context) {
 export async function DELETE(_request: Request, { params }: Context) {
   try {
     const { id } = await params;
-    const usage = await prisma.transaction.count({ where: { subscriptionId: id } });
-    if (usage > 0) {
-      // Keep the subscription for its historical ledger entries; just pause it.
-      const subscription = await prisma.subscription.update({ where: { id }, data: { active: false }, include: subscriptionInclude });
-      invalidateSubscriptionSyncCache();
-      return NextResponse.json({ subscription: serializeSubscription(subscription), archived: true });
-    }
-    await prisma.subscription.delete({ where: { id } });
+    // Count-then-delete must see one snapshot: a sync landing between the two
+    // used to race the delete into an FK violation (P2003).
+    const archived = await prisma.$transaction(async (tx) => {
+      const usage = await tx.transaction.count({ where: { subscriptionId: id } });
+      if (usage > 0) {
+        // Keep the subscription for its historical ledger entries; just pause it.
+        return await tx.subscription.update({ where: { id }, data: { active: false }, include: subscriptionInclude });
+      }
+      await tx.subscription.delete({ where: { id } });
+      return null;
+    });
     invalidateSubscriptionSyncCache();
+    if (archived) return NextResponse.json({ subscription: serializeSubscription(archived), archived: true });
     return NextResponse.json({ id, deleted: true });
   } catch (error) {
     return handleApiError(error);

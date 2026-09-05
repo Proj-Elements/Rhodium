@@ -294,6 +294,40 @@ describe("soft delete and restore", () => {
     expect((await visible.json()).transactions).toHaveLength(1);
   });
 
+  it("refuses in-place edits on a soft-deleted row", async () => {
+    const category = await createCategory("餐饮", CategoryType.EXPENSE);
+    const transaction = await addTransaction({ categoryId: category.id, date: "2024-03-10", amountCents: 1000 });
+    await deleteTransaction(new Request("http://localhost", { method: "DELETE" }), routeContext({ id: transaction.id }));
+
+    const response = await patchTransaction(
+      jsonRequest(`http://localhost/api/transactions/${transaction.id}`, "PATCH", {
+        type: "expense",
+        amount: "30.00",
+        occurredOn: "2024-03-10",
+        categoryId: category.id,
+      }),
+      routeContext({ id: transaction.id }),
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: "这条账目已被删除，请先恢复后再编辑" });
+    expect(await prisma.transaction.findUniqueOrThrow({ where: { id: transaction.id } })).toMatchObject({ amountCents: 1000 });
+  });
+
+  it("refuses to restore onto a category that was archived while the row was deleted", async () => {
+    const category = await createCategory("餐饮", CategoryType.EXPENSE);
+    const transaction = await addTransaction({ categoryId: category.id, date: "2024-03-10", amountCents: 1000 });
+    await deleteTransaction(new Request("http://localhost", { method: "DELETE" }), routeContext({ id: transaction.id }));
+    await prisma.category.update({ where: { id: category.id }, data: { archivedAt: new Date() } });
+
+    const response = await patchTransaction(
+      jsonRequest(`http://localhost/api/transactions/${transaction.id}`, "PATCH", { restore: true }),
+      routeContext({ id: transaction.id }),
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: "请选择有效的分类" });
+    expect((await prisma.transaction.findUniqueOrThrow({ where: { id: transaction.id } })).deletedAt).not.toBeNull();
+  });
+
   it("answers 404 for an unknown id instead of leaking a Prisma error", async () => {
     const response = await patchTransaction(
       jsonRequest("http://localhost/api/transactions/missing", "PATCH", { restore: true }),
