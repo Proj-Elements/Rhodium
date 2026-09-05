@@ -75,9 +75,10 @@ curl -fsSL -X POST $BASE/api/transactions -H 'content-type: application/json' \
 ### 2.4 修改 / 删除 / 恢复账目
 
 ```bash
-# 修改（body 与 POST 相同的字段，可部分携带；目标月份锁定会 409）
+# 修改（body 必须携带与 POST 相同的全部字段：type/amount/occurredOn/categoryId，
+# note 可省略；不支持只传部分字段的补丁式修改；目标月份锁定会 409）
 curl -fsSL -X PATCH $BASE/api/transactions/<id> -H 'content-type: application/json' \
-  -d '{"amount":"30.00","note":"改价"}'
+  -d '{"type":"expense","amount":"30.00","occurredOn":"2026-09-05","categoryId":"<分类id>","note":"改价"}'
 
 # 删除（软删除）
 curl -fsSL -X DELETE $BASE/api/transactions/<id>    # {"id":"...","deleted":true}
@@ -86,7 +87,7 @@ curl -fsSL -X DELETE $BASE/api/transactions/<id>    # {"id":"...","deleted":true
 curl -fsSL -X PATCH $BASE/api/transactions/<id> -H 'content-type: application/json' -d '{"restore":true}'
 ```
 
-注意：restore 的 body 必须只有 `{"restore":true}`，混入其他字段会被 400 拒绝。
+注意：restore 的 body 必须只有 `{"restore":true}`，混入其他字段会被 400 拒绝。已软删除的行不能直接编辑（409），要先 restore。restore 会重新校验分类：分类已被归档或类型不再匹配时返回 400「请选择有效的分类」。
 
 ### 2.5 预算
 
@@ -119,7 +120,7 @@ curl -fsSL $BASE/api/settlements/2026-09          # {"summary": {...}}
 curl -fsSL "$BASE/api/settlements?end=2026-09&include=focus"
 ```
 
-summary 字段：`budgetCents`/`budgetSource`/`expenseCents`/`incomeCents`/`remainingCents`、`subscriptionExpenseCents`（订阅产生的支出）、`topCategory`/`topDate`（单日最高）、`dailyBreakdown`（每天 `{date,expenseCents,incomeCents,transactionCount}`）、`dailyAverageCents`、`transactionCount`、`settlement`（已结算快照或 null）。
+summary 字段：`budgetCents`/`budgetSource`/`expenseCents`/`incomeCents`/`remainingCents`、`subscriptionExpenseCents`（订阅产生的支出）、`topCategory`/`topDate`（单日最高）、`dailyBreakdown`（每天 `{date,expenseCents,incomeCents,transactionCount}`）、`dailyAverageCents`、`transactionCount`（全部账目数）、`expenseTransactionCount`（仅支出笔数）、`settlement`（已结算快照或 null）。
 
 结算与重开（**写操作，先向用户确认**）：
 
@@ -149,10 +150,10 @@ curl -fsSL -X POST $BASE/api/subscriptions -H 'content-type: application/json' \
 # billingDay 1-31，短月自动取最后一天；endMonth 可选；分类必须是支出类（EXPENSE/BOTH）
 curl -fsSL -X PATCH $BASE/api/subscriptions/<id> -H 'content-type: application/json' -d '{"active":false}'  # 暂停（body 只能有 active）
 curl -fsSL -X DELETE $BASE/api/subscriptions/<id>   # 已有历史账目时只暂停不删除（响应 archived:true）
-curl -fsSL -X POST $BASE/api/subscriptions/sync     # 立刻补记到期的订阅账目 {"created":n,"syncedThrough":"YYYY-MM"}
+curl -fsSL -X POST $BASE/api/subscriptions/sync     # 立刻补记到期的订阅账目 {"created":n,"syncedThrough":"YYYY-MM-DD"}
 ```
 
-服务端对 sync 有 60 秒去抖，无需频繁调用。
+服务端对 sync 有 60 秒去抖，无需频繁调用；增删改订阅或重开月份会使其立即失效重算。
 
 ### 2.9 导入 / 导出
 
@@ -164,14 +165,14 @@ curl -fsSL "$BASE/api/export?format=csv"  -o transactions.csv
 # 先预检（不写库）：返回 total/valid/errors
 curl -fsSL -X POST $BASE/api/import/preview -H 'content-type: application/json' -d @import.json
 
-# 导入（同事务；最多 5000 行 / 8MB）
+# 导入（同事务；最多 20000 行 / 8MB；rows 可为空数组，只还原 backup 里的分类/订阅/预算/结算）
 curl -fsSL -X POST $BASE/api/import -H 'content-type: application/json' -d @import.json   # {"imported": n}
 ```
 
 导入行字段（中英文键等价）：`occurredOn`/`日期`（YYYY-MM-DD）、`amount`/`金额`（元）或 `amountCents`（分）、`type`/`类型`（`expense`/`income`，也接受 `支出`/`收入`）、`category`/`分类`（按名字匹配，缺省落「其他」）、`note`/`备注`。行内某月已锁定则整个请求 409。
 
 导入合并语义：
-- **裸行列表**（无 backup 字段）：一律新插入，行里带的 `id` 会被忽略——不可能覆盖已有账目。
+- **裸行列表**（无 backup 字段）：一律新插入，行里带的 `id` 会被忽略——不可能覆盖已有账目。因此把导出的 CSV 再导回会重复入账；整体还原请用 JSON 完整备份（带 `backup` 字段）。
 - **完整备份**（`backup` 字段 = export 的 JSON）：按自然键合并（分类按 名称+类型，订阅按名称，预算/结算按月份）；账目行带 `id` 时按 id upsert 且保留 createdAt。
 - 导入量大或不确定时先打 preview。
 
@@ -200,7 +201,7 @@ curl -fsSL -X POST $BASE/api/import -H 'content-type: application/json' -d @impo
 | DELETE /api/subscriptions/{id} | 删除或归档（有历史账目时） |
 | POST /api/subscriptions/sync | 补记到期订阅 |
 | POST /api/import/preview | 导入预检（不写库） |
-| POST /api/import | 导入（≤5000 行） |
+| POST /api/import | 导入（≤20000 行） |
 | GET /api/export?format=json\|csv | 全量备份 / CSV |
 
 ## 4. 数据结构
