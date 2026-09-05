@@ -33,7 +33,10 @@ export default function SettingsPage() {
   const [monthBudgetInput, setMonthBudgetInput] = useState("");
   const [futureBudgetInput, setFutureBudgetInput] = useState("");
   const [budgetPresetCents, setBudgetPresetCents] = useState<number | null>(null);
-  const [currentMonthBudgetCents, setCurrentMonthBudgetCents] = useState<number | null>(null);
+  // The server-resolved effective budget for this month (explicit row, else
+  // preset, else null) — showing only the explicit row made preset months
+  // read "未设置（来自默认预算）" instead of the amount that actually applies.
+  const [effectiveBudgetCents, setEffectiveBudgetCents] = useState<number | null>(null);
   const [currentMonthSource, setCurrentMonthSource] = useState<"month" | "preset" | "none">("none");
   const [budgetSaving, setBudgetSaving] = useState(false);
 
@@ -50,7 +53,7 @@ export default function SettingsPage() {
       ]);
       setCategories(categoryResult.categories || []);
       setBudgetPresetCents(budgetResult.preset?.amountCents ?? null);
-      setCurrentMonthBudgetCents(budgetResult.budget?.amountCents ?? null);
+      setEffectiveBudgetCents(budgetResult.effectiveBudgetCents ?? null);
       setCurrentMonthSource(budgetResult.budget ? "month" : budgetResult.preset ? "preset" : "none");
     } catch (loadError) {
       flash(errorMessage(loadError, "无法读取设置"));
@@ -159,7 +162,7 @@ export default function SettingsPage() {
     try {
       const result = await apiFetch<{ budget: { amountCents: number } }>(`/api/budgets/${currentMonth}`, { method: "PUT", json: { amount: monthBudgetInput } });
       // Trust the server's parsing instead of re-deriving cents on the client.
-      setCurrentMonthBudgetCents(result.budget.amountCents);
+      setEffectiveBudgetCents(result.budget.amountCents);
       setCurrentMonthSource("month");
       setMonthBudgetInput("");
       flash("本月预算已单独调整");
@@ -179,7 +182,7 @@ export default function SettingsPage() {
     setBudgetSaving(true);
     try {
       const result = await apiFetch<{ budget: { amountCents: number } }>(`/api/budgets/${currentMonth}?scope=future`, { method: "PUT", json: { amount: futureBudgetInput } });
-      setCurrentMonthBudgetCents(result.budget.amountCents);
+      setEffectiveBudgetCents(result.budget.amountCents);
       setCurrentMonthSource("month");
       setFutureBudgetInput("");
       flash("本月及以后每个月的预算已更新");
@@ -205,7 +208,7 @@ export default function SettingsPage() {
   }
 
   const presetDisplay = budgetPresetCents === null ? "未设置" : `¥${(budgetPresetCents / 100).toFixed(2)}`;
-  const currentMonthDisplay = currentMonthBudgetCents === null ? "未设置" : `¥${(currentMonthBudgetCents / 100).toFixed(2)}`;
+  const currentMonthDisplay = effectiveBudgetCents === null ? "未设置" : `¥${(effectiveBudgetCents / 100).toFixed(2)}`;
 
   return <AppShell>
     <div className="settings-grid">

@@ -125,6 +125,8 @@ describe("getMonthSummary", () => {
     expect(summary.expenseCents).toBe(30_000);
     expect(summary.incomeCents).toBe(12_000);
     expect(summary.transactionCount).toBe(2);
+    // The review's "N 笔支出" card must count expenses only, not all rows.
+    expect(summary.expenseTransactionCount).toBe(1);
     expect(summary.topCategory).toEqual({ name: "餐饮", amountCents: 30_000 });
     expect(summary.topDate).toEqual({ date: "2024-01-05", amountCents: 30_000 });
   });

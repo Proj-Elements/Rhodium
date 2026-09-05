@@ -105,6 +105,7 @@ function summarizeMonth(
     topDate: topDate ? { date: topDate[0], amountCents: topDate[1] } : null,
     subscriptionExpenseCents,
     transactionCount: transactions.length,
+    expenseTransactionCount,
     settlement: settlement ? serializeSettlement(settlement) : null,
   };
 }
