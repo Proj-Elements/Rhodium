@@ -43,7 +43,7 @@ POSTGRES_PASSWORD='强口令' APP_BIND=0.0.0.0 docker compose up -d --build
 
 `POSTGRES_PASSWORD` 只在**首次**创建数据卷时用于初始化数据库；之后修改需同时更新数据库中的角色口令。
 
-数据库口令来自 `.env` 的 `POSTGRES_PASSWORD`（未设置时 compose 会直接报错，不再回落到仓库里的默认口令）。两个服务的端口都只绑定 `127.0.0.1`，应用进程以非 root 的 `node` 用户运行。
+数据库口令优先来自 `.env` 的 `POSTGRES_PASSWORD`；未设置时回落到开发默认值 `yueyu_password`（与 `.env.example` 的连接串一致），该值只在**首次**创建数据卷时生效。两个服务的端口默认只绑定 `127.0.0.1`（可用 `DB_BIND`/`APP_BIND` 放开），应用进程以非 root 的 `node` 用户运行。
 
 ## 安全边界
 
@@ -54,6 +54,17 @@ POSTGRES_PASSWORD='强口令' APP_BIND=0.0.0.0 docker compose up -d --build
 - 响应头包含 CSP、`X-Frame-Options`、`Referrer-Policy` 等基础加固，API 响应统一 `Cache-Control: no-store`。
 - 请求体上限为 256 KB，导入接口 8 MB；超出返回 413。
 - `/api/export` 会导出全部账目（CSV 已做公式注入转义），请自行保管导出文件。
+
+## Agent 技能
+
+应用自带一份可一键安装的 Agent 技能包，安装后 ZCode 等支持 skills 的 Agent 能直接通过 API 查看和管理账本（查当月开支、记一笔、预算、结算、订阅、导入导出）。技能文件随应用分发，由应用自身在 `/skill/SKILL.md` 提供：
+
+```bash
+mkdir -p ~/.agents/skills/yueyu-ledger
+curl -fsSL http://127.0.0.1:3030/skill/SKILL.md -o ~/.agents/skills/yueyu-ledger/SKILL.md
+```
+
+安装后重启 Agent 会话即可生效。技能源文件在仓库的 `public/skill/SKILL.md`，应用升级时随版本更新，重新执行上面的命令即可刷新。
 
 ## 验证
 
