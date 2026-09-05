@@ -30,25 +30,11 @@ const titles: Record<string, { eyebrow: string; title: string; description: stri
 };
 
 /**
- * Every data route already runs the (debounced) server-side subscription sync, so
- * this ping only exists to drive the sidebar indicator. AppShell remounts on each
- * client-side navigation, so the promise is cached at module scope to keep it at
- * one request per browser session instead of one per page view. Failures are not
- * cached so the next navigation retries.
+ * The sidebar indicator pings the sync on every AppShell mount. Server-side
+ * syncs are cooldown-cached, so the extra POST is cheap; caching the ping at
+ * module scope (one per browser session) instead used to keep the badge stuck
+ * on "已同步" long after every later sync had started failing.
  */
-let syncPing: Promise<void> | null = null;
-
-function pingSubscriptionSync() {
-  if (syncPing) return syncPing;
-  const pending = fetch("/api/subscriptions/sync", { method: "POST" }).then((response) => {
-    if (!response.ok) throw new Error("sync failed");
-  });
-  syncPing = pending;
-  pending.catch(() => {
-    if (syncPing === pending) syncPing = null;
-  });
-  return pending;
-}
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   return <Link href={item.href} className={`nav-item${active ? " active" : ""}`}>
@@ -74,8 +60,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
-    pingSubscriptionSync()
-      .then(() => { if (mounted) setSyncState("ready"); })
+    fetch("/api/subscriptions/sync", { method: "POST" })
+      .then((response) => { if (!response.ok) throw new Error("sync failed"); if (mounted) setSyncState("ready"); })
       .catch(() => { if (mounted) setSyncState("error"); });
     return () => { mounted = false; };
   }, []);

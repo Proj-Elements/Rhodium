@@ -99,7 +99,22 @@ async function runSync(referenceDate: string) {
     select: { id: true, amountCents: true, billingDay: true, categoryId: true, note: true, name: true, startMonth: true, endMonth: true },
   });
 
-  const candidates = planBillingCandidates(subscriptions, referenceDate);
+  // A category can be archived after the subscription was validated; keep
+  // planning against it would keep writing expenses into a dead category.
+  let usable = subscriptions;
+  if (subscriptions.length) {
+    const activeCategoryIds = new Set(
+      (
+        await prisma.category.findMany({
+          where: { id: { in: [...new Set(subscriptions.map((subscription) => subscription.categoryId))] }, archivedAt: null },
+          select: { id: true },
+        })
+      ).map((category) => category.id),
+    );
+    usable = subscriptions.filter((subscription) => activeCategoryIds.has(subscription.categoryId));
+  }
+
+  const candidates = planBillingCandidates(usable, referenceDate);
   if (!candidates.length) return { created: 0, syncedThrough: dateOnlyKey(new Date(`${referenceDate}T00:00:00.000Z`)) };
 
   const candidateMonths = [...new Set(candidates.map((candidate) => candidate.month))];

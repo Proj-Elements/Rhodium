@@ -71,6 +71,15 @@ describe("syncSubscriptions", () => {
     expect(retried.created).toBe(3);
     expect(await prisma.transaction.count()).toBe(3);
   });
+
+  it("stops planning occurrences once the subscription's category is archived", async () => {
+    const category = await createCategory();
+    await addSubscription("网盘", category.id);
+    await prisma.category.update({ where: { id: category.id }, data: { archivedAt: new Date("2024-01-10T00:00:00.000Z") } });
+
+    expect((await syncSubscriptions(REFERENCE)).created).toBe(0);
+    expect(await prisma.transaction.count()).toBe(0);
+  });
 });
 
 /**
