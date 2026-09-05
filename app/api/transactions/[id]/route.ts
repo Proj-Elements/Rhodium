@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { TransactionType } from "@prisma/client";
-import { handleApiError, parseJsonBody, jsonError } from "@/lib/api";
-import { moneyToCents, monthKey, parseDateOnly } from "@/lib/domain";
+import { handleApiError, parseJsonBody } from "@/lib/api";
+import { monthKey } from "@/lib/domain";
 import { conflict, notFound } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
-import { transactionSchema, restoreSchema } from "@/lib/validation";
-import { serializeTransaction } from "@/lib/serializers";
+import { transactionRestoreSchema, transactionSchema } from "@/lib/validation";
+import { serializeTransaction, transactionInclude } from "@/lib/serializers";
+import { assertTransactionCategory, transactionData } from "@/lib/transactions";
 import { isMonthLocked } from "@/lib/summary";
 
 export const dynamic = "force-dynamic";
@@ -22,34 +22,23 @@ export async function PATCH(request: Request, { params }: Context) {
 
     // Restore is its own strict body so it cannot smuggle other fields past
     // transactionSchema, and it only applies to a soft-deleted row.
-    const restore = restoreSchema.safeParse(body);
-    if (restore.success) {
+    if (transactionRestoreSchema.safeParse(body).success) {
       if (!existing.deletedAt) throw conflict("这条账目没有被删除，无需恢复");
       const restored = await prisma.transaction.update({
         where: { id },
         data: { deletedAt: null },
-        include: { category: true, subscription: { select: { name: true } } },
+        include: transactionInclude,
       });
       return NextResponse.json({ transaction: serializeTransaction(restored) });
     }
 
     const parsed = transactionSchema.parse(body);
-    const occurredOn = parseDateOnly(parsed.occurredOn);
     if (await isMonthLocked(parsed.occurredOn.slice(0, 7))) throw conflict("目标月份已经结算，请先重新打开本月");
-    const category = await prisma.category.findFirst({
-      where: { id: parsed.categoryId, archivedAt: null, OR: [{ type: "BOTH" }, { type: parsed.type === "expense" ? "EXPENSE" : "INCOME" }] },
-    });
-    if (!category) return jsonError("请选择有效的分类");
+    await assertTransactionCategory(parsed.categoryId, parsed.type);
     const transaction = await prisma.transaction.update({
       where: { id },
-      data: {
-        type: parsed.type === "expense" ? TransactionType.EXPENSE : TransactionType.INCOME,
-        amountCents: moneyToCents(parsed.amount),
-        occurredOn,
-        categoryId: parsed.categoryId,
-        note: parsed.note?.trim() || null,
-      },
-      include: { category: true, subscription: { select: { name: true } } },
+      data: transactionData(parsed),
+      include: transactionInclude,
     });
     return NextResponse.json({ transaction: serializeTransaction(transaction) });
   } catch (error) {

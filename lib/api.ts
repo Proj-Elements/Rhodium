@@ -23,10 +23,34 @@ export function handleApiError(error: unknown) {
   return jsonError("服务器暂时无法完成请求", 500);
 }
 
-export function parseJsonBody(request: Request) {
-  return request.json().catch(() => {
+/**
+ * Body-size guards. Every route buffers its JSON body, so without a cap a
+ * single oversized request can pin the process's memory. The import routes
+ * legitimately carry thousands of rows, so they get a larger ceiling.
+ */
+export const MAX_BODY_BYTES = 256 * 1024;
+export const MAX_IMPORT_BODY_BYTES = 8 * 1024 * 1024;
+
+function tooLargeMessage(maxBytes: number): string {
+  return `请求体过大，最多 ${Math.round(maxBytes / 1024)} KB`;
+}
+
+export async function parseJsonBody(request: Request, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > maxBytes) throw new AppError(tooLargeMessage(maxBytes), 413);
+  let text: string;
+  try {
+    text = await request.text();
+  } catch {
+    throw new AppError("无法读取请求体", 400);
+  }
+  // content-length is optional and untrusted: check what actually arrived.
+  if (Buffer.byteLength(text, "utf8") > maxBytes) throw new AppError(tooLargeMessage(maxBytes), 413);
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
     throw new AppError("请求体不是有效 JSON", 400);
-  });
+  }
 }
 
 /**

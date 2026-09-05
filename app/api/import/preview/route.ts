@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handleApiError, parseJsonBody } from "@/lib/api";
+import { handleApiError, MAX_IMPORT_BODY_BYTES, parseJsonBody } from "@/lib/api";
 import { importSchema } from "@/lib/validation";
 import { validateRowShallow } from "@/lib/import-parser";
 
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const body = importSchema.parse(await parseJsonBody(request));
+    const body = importSchema.parse(await parseJsonBody(request, MAX_IMPORT_BODY_BYTES));
     const errors: string[] = [];
     let invalid = 0;
     const preview = body.rows.map((row, index) => {

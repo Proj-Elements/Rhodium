@@ -4,6 +4,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: yueyu
+      # 口令在 .env 里通过 POSTGRES_PASSWORD 覆盖（见 .env.example）；
+      # 未设置时使用开发默认值，仅在首次创建数据卷时生效。
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-yueyu_password}
       POSTGRES_DB: yueyu
       TZ: Asia/Shanghai

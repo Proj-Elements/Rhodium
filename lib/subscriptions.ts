@@ -1,13 +1,46 @@
 import { TransactionType } from "@prisma/client";
-import { dateOnlyKey, monthStart, todayInShanghai } from "@/lib/domain";
+import { dateOnlyKey, moneyToCents, monthStart, todayInShanghai } from "@/lib/domain";
+import { badRequest } from "@/lib/errors";
 import { planBillingCandidates } from "@/lib/subscription-planner";
 import { prisma } from "@/lib/prisma";
+import type { subscriptionSchema } from "@/lib/validation";
+import type { z } from "zod";
+
+type SubscriptionInput = z.infer<typeof subscriptionSchema>;
+
+/**
+ * Reject a subscription whose category cannot hold expenses. Both the create
+ * and update routes need the same check, and the same wording.
+ */
+export async function assertExpenseCategory(categoryId: string): Promise<void> {
+  const category = await prisma.category.findFirst({
+    where: { id: categoryId, archivedAt: null, OR: [{ type: "EXPENSE" }, { type: "BOTH" }] },
+    select: { id: true },
+  });
+  if (!category) throw badRequest("订阅必须使用有效的支出分类");
+}
+
+/** Map validated input onto the Prisma columns shared by create and update. */
+export function subscriptionData(input: SubscriptionInput) {
+  return {
+    name: input.name,
+    amountCents: moneyToCents(input.amount),
+    billingDay: input.billingDay,
+    categoryId: input.categoryId,
+    startMonth: monthStart(input.startMonth),
+    endMonth: input.endMonth ? monthStart(input.endMonth) : null,
+    active: input.active,
+    note: input.note?.trim() || null,
+  };
+}
 
 /** Run the real sync at most once in this window; other callers reuse the result. */
 const SYNC_COOLDOWN_MS = 60_000;
 
-let lastSyncAt = 0;
-let lastSyncPromise: Promise<{ created: number; syncedThrough: string }> | null = null;
+type SyncResult = { created: number; syncedThrough: string };
+
+let lastSync: { at: number; referenceDate: string; result: SyncResult } | null = null;
+let inFlight: { referenceDate: string; promise: Promise<SyncResult> } | null = null;
 
 /**
  * Batched subscription sync (fixed the previous N+1: one query per month for
@@ -18,25 +51,35 @@ let lastSyncPromise: Promise<{ created: number; syncedThrough: string }> | null 
  *  2. one findMany fetches existing occurrence keys,
  *  3. createMany inserts the remainder (race-safe via the unique key).
  *
- * Calls are debounced: within the cooldown window every caller shares the
- * in-flight *or already settled* result. The cached promise is only dropped when
- * the window expires or the sync failed, so a burst of dashboard requests does
- * one round of queries rather than one per request.
+ * Two layers of call reduction:
+ *  - a successful run is cached for the cooldown window, so back-to-back
+ *    requests reuse the result instead of re-querying the database,
+ *  - concurrent callers share the in-flight promise.
+ * A failed run is never cached, and the shared promise is dropped so one
+ * failure cannot poison later callers.
  */
-export function syncSubscriptions(referenceDate = todayInShanghai()) {
-  const now = Date.now();
-  if (lastSyncPromise && now - lastSyncAt < SYNC_COOLDOWN_MS) return lastSyncPromise;
-  lastSyncAt = now;
-  const pending = runSync(referenceDate);
-  lastSyncPromise = pending;
-  // A failed sync must not be cached: the next caller should retry immediately.
-  pending.catch(() => {
-    if (lastSyncPromise === pending) {
-      lastSyncPromise = null;
-      lastSyncAt = 0;
-    }
-  });
-  return pending;
+export function syncSubscriptions(referenceDate = todayInShanghai()): Promise<SyncResult> {
+  if (lastSync && lastSync.referenceDate === referenceDate && Date.now() - lastSync.at < SYNC_COOLDOWN_MS) {
+    return Promise.resolve(lastSync.result);
+  }
+  if (inFlight && inFlight.referenceDate === referenceDate) return inFlight.promise;
+
+  const promise = runSync(referenceDate)
+    .then((result) => {
+      lastSync = { at: Date.now(), referenceDate, result };
+      return result;
+    })
+    .finally(() => {
+      if (inFlight?.promise === promise) inFlight = null;
+    });
+  inFlight = { referenceDate, promise };
+  return promise;
+}
+
+/** Test-only: drop the cooldown cache so each case starts from a clean slate. */
+export function resetSubscriptionSyncCache() {
+  lastSync = null;
+  inFlight = null;
 }
 
 async function runSync(referenceDate: string) {

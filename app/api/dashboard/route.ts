@@ -3,9 +3,9 @@ import { TransactionType } from "@prisma/client";
 import { calculateRemaining, calculateUsage, dateOnlyKey, daysInMonth, parseMonth, todayInShanghai } from "@/lib/domain";
 import { handleApiError, monthRange } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
-import { serializeTransaction } from "@/lib/serializers";
+import { serializeTransaction, transactionInclude } from "@/lib/serializers";
 import { syncSubscriptions } from "@/lib/subscriptions";
-import { resolveMonthBudget } from "@/lib/budget";
+import { resolveBudget } from "@/lib/budget";
 
 export const dynamic = "force-dynamic";
 
@@ -19,20 +19,20 @@ export async function GET(request: Request) {
     // no write here.
     await syncSubscriptions();
 
-    const { start, nextStart } = monthRange(month);
+    const { start, end, nextStart } = monthRange(month);
     const today = todayInShanghai();
     const currentMonth = today.slice(0, 7);
     const todayDate = new Date(`${today}T00:00:00.000Z`);
     const monthStatus: "past" | "current" | "future" = month < currentMonth ? "past" : month > currentMonth ? "future" : "current";
-    const focusDate = monthStatus === "current" ? todayDate : monthStatus === "past" ? monthRange(month).end : start;
+    const focusDate = monthStatus === "current" ? todayDate : monthStatus === "past" ? end : start;
     const recentStart = new Date(focusDate);
     recentStart.setUTCDate(recentStart.getUTCDate() - 6);
     const chartStart = month === currentMonth || recentStart >= start ? recentStart : start;
     const chartDayCount = Math.floor((focusDate.getTime() - chartStart.getTime()) / 86_400_000) + 1;
 
     const monthTxWhere = { deletedAt: null as null, occurredOn: { gte: start, lt: nextStart } };
-    const [budget, expense, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups] = await Promise.all([
-      resolveMonthBudget(month),
+    const [budget, expense, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups, categories] = await Promise.all([
+      resolveBudget(month),
       prisma.transaction.aggregate({
         where: { ...monthTxWhere, type: TransactionType.EXPENSE },
         _sum: { amountCents: true },
@@ -49,7 +49,7 @@ export async function GET(request: Request) {
       }),
       prisma.transaction.findMany({
         where: monthTxWhere,
-        include: { category: true, subscription: { select: { name: true } } },
+        include: transactionInclude,
         orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }],
         take: 10,
       }),
@@ -73,16 +73,12 @@ export async function GET(request: Request) {
         where: { type: TransactionType.INCOME, deletedAt: null, occurredOn: { gte: chartStart, lte: focusDate } },
         _sum: { amountCents: true },
       }),
+      // Categories are a tiny table; loading them here avoids a second
+      // sequential round trip once the expense grouping is known.
+      prisma.category.findMany({ select: { id: true, name: true } }),
     ]);
 
-    // The 10 recent transactions already carry their categories; only ids that
-    // are not among them need a lookup, which is usually none.
-    const categoryMap = new Map(transactions.map((item) => [item.categoryId, item.category.name]));
-    const missingCategoryIds = grouped.map((item) => item.categoryId).filter((id) => !categoryMap.has(id));
-    if (missingCategoryIds.length) {
-      const categories = await prisma.category.findMany({ where: { id: { in: missingCategoryIds } }, select: { id: true, name: true } });
-      for (const category of categories) categoryMap.set(category.id, category.name);
-    }
+    const categoryMap = new Map(categories.map((category) => [category.id, category.name]));
 
     const expenseByDate = new Map(recentExpenseGroups.map((item) => [dateOnlyKey(item.occurredOn), item._sum.amountCents ?? 0]));
     const incomeByDate = new Map(recentIncomeGroups.map((item) => [dateOnlyKey(item.occurredOn), item._sum.amountCents ?? 0]));

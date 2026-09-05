@@ -8,7 +8,9 @@ import tsPlugin from "@typescript-eslint/eslint-plugin";
 const compat = new FlatCompat({ baseDirectory: dirname(fileURLToPath(import.meta.url)) });
 
 const config = [
-  { ignores: ["node_modules/**", ".next/**", "out/**", "prisma/migrations/**", "next-env.d.ts"] },
+  // Agent tooling checks out scratch worktrees inside the repo directory
+  // (.claude/.freebuff/.copilot); their code must never enter this project's lint.
+  { ignores: ["node_modules/**", ".next/**", "out/**", "prisma/migrations/**", "next-env.d.ts", ".claude/**", ".freebuff/**", ".copilot/**"] },
   ...compat.extends("next/core-web-vitals"),
   {
     files: ["**/*.{ts,tsx}"],

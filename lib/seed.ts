@@ -19,6 +19,11 @@ const defaults = [
 
 let seeded = false;
 
+/** Tests truncate the category table, which must invalidate the process flag. */
+export function resetSeedCache() {
+  seeded = false;
+}
+
 /**
  * Seed default categories once per process. The in-memory flag means steady
  * state GET requests no longer issue a `createMany` write on every call

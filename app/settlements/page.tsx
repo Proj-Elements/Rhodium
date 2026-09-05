@@ -68,10 +68,10 @@ function DailyCalendar({ month, days }: { month: string; days: Summary["dailyBre
         const column = cellIndex % 7;
         const row = Math.floor(cellIndex / 7);
         const tooltipClass = `${column === 0 ? " edge-left" : ""}${column === 6 ? " edge-right" : ""}${row === 0 ? " below" : ""}`;
-        return <button type="button" className={`calendar-day${hasData ? " has-data" : ""}${day.date === today ? " today" : ""}${activeDate === day.date ? " is-active" : ""}`} key={day.date} onMouseEnter={() => setActiveDate(day.date)} onFocus={() => setActiveDate(day.date)} onBlur={() => setActiveDate(null)} aria-label={`${day.date}，支出 ${formatMoney(day.expenseCents)}，收入 ${formatMoney(day.incomeCents)}，${day.transactionCount} 笔记录`} style={{ "--day-expense": intensity } as CSSProperties}>
+        return <button type="button" className={`calendar-day${hasData ? " has-data" : ""}${day.date === today ? " today" : ""}${activeDate === day.date ? " is-active" : ""}`} key={day.date} onClick={() => setActiveDate((current) => (current === day.date ? null : day.date))} onMouseEnter={() => setActiveDate(day.date)} onFocus={() => setActiveDate(day.date)} onBlur={() => setActiveDate(null)} aria-label={`${day.date}，支出 ${formatMoney(day.expenseCents)}，收入 ${formatMoney(day.incomeCents)}，${day.transactionCount} 笔记录`} style={{ "--day-expense": intensity } as CSSProperties}>
           <span className="calendar-day-number">{dayNumber}</span>
           {hasData && <span className="calendar-day-summary"><span className="calendar-day-expense">{formatCalendarMoney(day.expenseCents)}</span>{day.incomeCents > 0 && <span className="calendar-day-income">+{formatCalendarMoney(day.incomeCents)}</span>}</span>}
-          {activeDate === day.date && <span className={`calendar-tooltip${tooltipClass}`} role="status"><strong>{day.date.slice(5).replace("-", "/")}</strong><span className="expense">支出 {formatMoney(day.expenseCents)}</span><span className="income">收入 {formatMoney(day.incomeCents)}</span><small>{day.transactionCount} 笔记录</small></span>}
+          {activeDate === day.date && <span className={`calendar-tooltip${tooltipClass}`} aria-hidden="true"><strong>{day.date.slice(5).replace("-", "/")}</strong><span className="expense">支出 {formatMoney(day.expenseCents)}</span><span className="income">收入 {formatMoney(day.incomeCents)}</span><small>{day.transactionCount} 笔记录</small></span>}
         </button>;
       })}
     </div>

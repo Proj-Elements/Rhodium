@@ -189,8 +189,8 @@ export default function TransactionsPage() {
     </div>
 
     <div className="ledger-toolbar">
-      <div className="filter-tabs" role="tablist" aria-label="账目类型">
-        {(["all", "expense", "income"] as const).map((value) => <button type="button" role="tab" aria-selected={filter === value} className={filter === value ? "active" : ""} key={value} onClick={() => setFilter(value)}>{value === "all" ? "全部" : value === "expense" ? "支出" : "收入"}</button>)}
+      <div className="filter-tabs" role="group" aria-label="账目类型">
+        {(["all", "expense", "income"] as const).map((value) => <button type="button" aria-pressed={filter === value} className={filter === value ? "active" : ""} key={value} onClick={() => setFilter(value)}>{value === "all" ? "全部" : value === "expense" ? "支出" : "收入"}</button>)}
       </div>
       <input className="form-control search-control" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="搜索备注或分类" aria-label="搜索账目" />
       <select className="form-control filter-select" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} aria-label="按分类筛选">

@@ -41,8 +41,8 @@ function SpendingChart({ days }: { days: DashboardDTO["recentExpenses"] }) {
         <polygon className="chart-area" points={area} />
         <polyline className="chart-line" points={pointString} />
       </svg>
-      {points.map((point) => <span className="chart-point" key={point.date} role="button" tabIndex={0} aria-label={`${formatShortDate(point.date)}，支出 ${formatMoney(point.amountCents)}，收入 ${formatMoney(point.incomeCents)}`} onMouseEnter={() => setActiveDate(point.date)} onFocus={() => setActiveDate(point.date)} onBlur={() => setActiveDate(null)} onKeyDown={(event) => { if (event.key === "Escape") setActiveDate(null); }} style={{ left: `${point.x}%`, top: `${(point.y / 170) * 100}%` }} />)}
-      {activePoint && <div className={`chart-tooltip${tooltipClass}`} style={{ left: `${activePoint.x}%`, top: `${(activePoint.y / 170) * 100}%` }} role="status"><strong>{formatShortDate(activePoint.date)}</strong><span className="expense"><i />支出 {formatMoney(activePoint.amountCents)}</span><span className="income"><i />收入 {formatMoney(activePoint.incomeCents)}</span></div>}
+      {points.map((point) => <button className="chart-point" key={point.date} type="button" aria-label={`${formatShortDate(point.date)}，支出 ${formatMoney(point.amountCents)}，收入 ${formatMoney(point.incomeCents)}`} onClick={() => setActiveDate((current) => (current === point.date ? null : point.date))} onMouseEnter={() => setActiveDate(point.date)} onFocus={() => setActiveDate(point.date)} onBlur={() => setActiveDate(null)} onKeyDown={(event) => { if (event.key === "Escape") setActiveDate(null); }} style={{ left: `${point.x}%`, top: `${(point.y / 170) * 100}%` }} />)}
+      {activePoint && <div className={`chart-tooltip${tooltipClass}`} style={{ left: `${activePoint.x}%`, top: `${(activePoint.y / 170) * 100}%` }} aria-hidden="true"><strong>{formatShortDate(activePoint.date)}</strong><span className="expense"><i />支出 {formatMoney(activePoint.amountCents)}</span><span className="income"><i />收入 {formatMoney(activePoint.incomeCents)}</span></div>}
     </div>
     <div className="chart-labels">{days.map((day) => <span key={day.date}>{formatShortDate(day.date)}</span>)}</div>
     <div className="chart-caption"><span>最高的一天</span><strong>{formatMoney(Math.max(...days.map((day) => day.amountCents)))}</strong></div>
@@ -121,7 +121,7 @@ export default function DashboardPage() {
   }).format(new Date(`${today}T00:00:00+08:00`)) : "正在打开你的账本"), [today]);
 
   const focusDateLabel = data?.monthStatus === "future" ? "未开始" : data && data.focusDate === data.today ? "今天" : data ? dateLabel(data.focusDate) : "";
-  const chartTitle = data?.monthStatus === "future" ? "月初预览" : "最近 7 天";
+  const chartTitle = data?.monthStatus === "future" ? "月初预览" : data?.monthStatus === "past" ? "月末 7 天" : "最近 7 天";
   // Once a preset (or explicit budget) covers the month, the prompt banner
   // stays hidden — budget management lives in 设置.
   const showBudgetPrompt = Boolean(data && data.budgetSource === "none");

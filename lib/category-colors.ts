@@ -1,4 +1,4 @@
-export const categoryPalette = [
+const categoryPalette = [
   { color: "var(--blue)", surface: "var(--cat-blue-surface)" },
   { color: "var(--lavender)", surface: "var(--cat-lavender-surface)" },
   { color: "var(--gold)", surface: "var(--cat-gold-surface)" },

@@ -33,9 +33,6 @@ export const transactionSchema = z.object({
   note: z.string().max(200).optional().nullable(),
 });
 
-/** Restore-only body for PATCH /api/transactions/[id]; nothing else may ride along. */
-export const restoreSchema = z.object({ restore: z.literal(true) }).strict();
-
 export const budgetSchema = z.object({
   amount: amountValue,
 });
@@ -59,6 +56,11 @@ export const subscriptionSchema = z
 /** Toggle-only body for PATCH /api/subscriptions/[id]. */
 export const subscriptionToggleSchema = z
   .object({ active: z.boolean() })
+  .strict();
+
+/** Restore-only PATCH body for a soft-deleted transaction ({ restore: true }). */
+export const transactionRestoreSchema = z
+  .object({ restore: z.literal(true) })
   .strict();
 
 export const categorySchema = z.object({

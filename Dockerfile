@@ -34,7 +34,7 @@ COPY --from=builder --chown=node:node /app/public ./public
 COPY --from=builder --chown=node:node /app/prisma ./prisma
 COPY --from=deps --chown=node:node /app/node_modules/prisma ./node_modules/prisma
 COPY --from=deps --chown=node:node /app/node_modules/@prisma ./node_modules/@prisma
-# Do not run the server as root; nothing here is written to at runtime.
+# Do not run the server as root; the runtime only reads the bundle and talks to Postgres.
 USER node
 EXPOSE 3030
 CMD ["sh", "-c", "node ./node_modules/prisma/build/index.js migrate deploy && node server.js"]

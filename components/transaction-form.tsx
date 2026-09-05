@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { apiFetch, errorMessage } from "@/lib/api-client";
 import { todayInShanghai } from "@/lib/domain";
 import { CategoryDTO, TransactionDTO } from "@/lib/types";
 import { Icon } from "@/components/icon";
@@ -46,17 +47,14 @@ export function TransactionForm({ categories, transaction, defaultDate, onClose,
     setError("");
     setSaving(true);
     try {
-      const response = await fetch(transaction ? `/api/transactions/${transaction.id}` : "/api/transactions", {
+      await apiFetch(transaction ? `/api/transactions/${transaction.id}` : "/api/transactions", {
         method: transaction ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type, amount, occurredOn, categoryId, note }),
+        json: { type, amount, occurredOn, categoryId, note },
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "保存失败，请稍后再试");
       window.localStorage.setItem("yueyu-last-entry-date", occurredOn);
       onSaved();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "保存失败，请稍后再试");
+      setError(errorMessage(saveError, "保存失败，请稍后再试"));
     } finally {
       setSaving(false);
     }

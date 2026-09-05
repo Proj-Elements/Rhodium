@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import { Icon } from "@/components/icon";
 import { ColorModeToggle } from "@/components/color-mode-toggle";
 import { requestNewTransaction } from "@/lib/new-transaction-intent";
+import { nextColorMode } from "@/lib/theme";
 import { useColorMode } from "@/lib/use-color-mode";
 
 type NavItem = { href: string; label: string; description: string; icon: "grid" | "receipt" | "repeat" | "calendar" | "settings" };
@@ -27,9 +28,6 @@ const titles: Record<string, { eyebrow: string; title: string; description: stri
   "/settlements": { eyebrow: "MONTHLY REVIEW", title: "这个月，留下些什么？", description: "用一次月末回顾，把花销变成下一月更好的参考。" },
   "/settings": { eyebrow: "SETTINGS", title: "把账本调成你的样子。", description: "管理分类、导入旧账，或把数据完整地带走。" },
 };
-
-/** Mirrors the CSS breakpoint: below this width the mobile chrome is used. */
-const MOBILE_QUERY = "(max-width: 900px)";
 
 /**
  * Every data route already runs the (debounced) server-side subscription sync, so
@@ -52,18 +50,6 @@ function pingSubscriptionSync() {
   return pending;
 }
 
-function useIsMobileViewport() {
-  const [isMobile, setIsMobile] = useState(false);
-  useEffect(() => {
-    const query = window.matchMedia(MOBILE_QUERY);
-    const update = () => setIsMobile(query.matches);
-    update();
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return isMobile;
-}
-
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
   return <Link href={item.href} className={`nav-item${active ? " active" : ""}`}>
     <span className="nav-icon"><Icon name={item.icon} size={17} /></span>
@@ -77,8 +63,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const router = useRouter();
   const page = titles[pathname] || titles["/dashboard"];
   const [syncState, setSyncState] = useState<"syncing" | "ready" | "error">("syncing");
-  const isMobile = useIsMobileViewport();
-  const { mode, setMode: setColorMode, hydrated: themeHydrated } = useColorMode();
+  const { mode, setMode: setColorMode, hydrated: themeHydrated, systemDark } = useColorMode();
 
   // Was a <Link href="/transactions?new=1">, which did nothing when the user was
   // already on /transactions: same-route navigation does not remount the page.
@@ -118,31 +103,31 @@ export function AppShell({ children }: { children: ReactNode }) {
       <div className="sidebar-footer">CNY · ASIA/SHANGHAI</div>
     </aside>
     <main className="main-content">
-      {/* Mobile chrome is only mounted on narrow viewports; previously it was
-          always in the DOM and merely hidden by CSS, so any stylesheet glitch
-          leaked the nav bar onto wide screens (top-right of the window). */}
-      {isMobile && (
-        <>
-          <div className="mobile-topbar">
-            <Link href="/dashboard" className="mobile-brand"><span className="brand-mark"><span>月</span></span><strong>月余</strong></Link>
-            <div className="mobile-topbar-actions">
-              <button
-                type="button"
-                className="icon-button theme-cycle-button"
-                aria-label={`颜色模式：${mode === "system" ? "跟随系统" : mode === "light" ? "亮色" : "暗色"}（点按切换）`}
-                disabled={!themeHydrated}
-                onClick={() => setColorMode(mode === "system" ? (themeHydrated && document.documentElement.dataset.colorScheme === "dark" ? "light" : "dark") : mode === "light" ? "dark" : "system")}
-              >
-                <Icon name={mode === "system" ? "monitor" : mode === "light" ? "sun" : "moon"} size={16} />
-              </button>
-              <button type="button" onClick={openNewTransaction} className="button button-primary button-small"><Icon name="plus" size={15} />记一笔</button>
-            </div>
-          </div>
-          <nav className="mobile-nav" aria-label="移动端导航">
-            {[...navItems, ...secondaryItems].map((item) => <Link href={item.href} key={item.href} className={pathname === item.href ? "active" : ""}><Icon name={item.icon} size={18} /><span>{item.label}</span></Link>)}
-          </nav>
-        </>
-      )}
+      {/* Mobile chrome stays mounted and is shown/hidden purely by the
+          (max-width: 900px) media query in globals.css. Gating it on a
+          matchMedia state instead made narrow viewports render the desktop
+          header on the first paint, then swap in the mobile bars. */}
+      <div className="mobile-topbar">
+        <Link href="/dashboard" className="mobile-brand"><span className="brand-mark"><span>月</span></span><strong>月余</strong></Link>
+        <div className="mobile-topbar-actions">
+          <button
+            type="button"
+            className="icon-button theme-cycle-button"
+            aria-label={`颜色模式：${mode === "system" ? "跟随系统" : mode === "light" ? "亮色" : "暗色"}（点按切换）`}
+            disabled={!themeHydrated}
+            onClick={() => setColorMode(nextColorMode(mode, systemDark))}
+          >
+            <Icon name={mode === "system" ? "monitor" : mode === "light" ? "sun" : "moon"} size={16} />
+          </button>
+          {/* A plain Link to ?new=1 is a no-op when /transactions is already
+              open (same-route navigation does not remount), so trigger the
+              intent through the shared event instead. */}
+          <button type="button" onClick={openNewTransaction} className="button button-primary button-small"><Icon name="plus" size={15} />记一笔</button>
+        </div>
+      </div>
+      <nav className="mobile-nav" aria-label="移动端导航">
+        {[...navItems, ...secondaryItems].map((item) => <Link href={item.href} key={item.href} className={pathname === item.href ? "active" : ""}><Icon name={item.icon} size={18} /><span>{item.label}</span></Link>)}
+      </nav>
       <header className="page-header">
         <div className="page-header-copy">
           <p className="eyebrow">{page.eyebrow}</p>

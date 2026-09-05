@@ -168,7 +168,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .brand-copy small { display: block; margin-top: 4px; color: var(--muted); font-family: var(--mono); font-size: 8px; letter-spacing: .8px; line-height: 1; }
 .sidebar-rule { height: 1px; margin: 27px 10px 25px; background: var(--line); }
 .side-nav { display: flex; flex-direction: column; gap: 3px; }
-.nav-label, .eyebrow, .note-kicker { margin: 0 10px 10px; color: var(--muted-soft); font-family: var(--mono); font-size: 9px; font-weight: 500; letter-spacing: 1.15px; text-transform: uppercase; }
+.nav-label, .eyebrow { margin: 0 10px 10px; color: var(--muted-soft); font-family: var(--mono); font-size: 9px; font-weight: 500; letter-spacing: 1.15px; text-transform: uppercase; }
 .nav-label.secondary-label { margin-top: 29px; }
 .nav-item { position: relative; display: flex; min-height: 46px; align-items: center; gap: 10px; padding: 6px 12px; border: 1px solid transparent; border-radius: 7px; color: var(--body); transition: background .16s ease, border-color .16s ease, color .16s ease; }
 .nav-item:hover { border-color: var(--line); background: var(--canvas-soft); color: var(--ink); }
@@ -224,7 +224,6 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .button-danger { border-color: transparent; background: transparent; color: var(--error); }
 .button-danger:hover { background: var(--error-soft); }
 .button-small { min-height: 32px; padding: 7px 10px; font-size: 12px; }
-.button-icon { width: 40px; padding: 0; }
 .card { border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 25px; }
 .toolbar-note { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
@@ -276,24 +275,19 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .budget-prompt strong { display: block; font-size: 13px; font-weight: 650; line-height: 1.35; }
 .budget-prompt span { display: block; margin-top: 4px; color: var(--body); font-size: 11px; line-height: 1.45; }
 .budget-copy { min-width: 0; }
-.budget-copy .budget-inline { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-family: var(--mono); font-size: 11px; }
-.budget-copy .budget-inline strong { display: inline; color: var(--ink); font-family: var(--mono); font-size: 12px; font-weight: 500; }
 .inline-budget { display: flex; min-width: 235px; align-items: center; gap: 7px; }
 .inline-budget input { width: 126px; }
-.budget-pace { min-width: 175px; color: var(--body); font-size: 11px; text-align: right; }
-.budget-pace strong { display: block; color: var(--ink); font-family: var(--mono); font-size: 12px; font-weight: 500; }
-.budget-edit-button { flex: 0 0 auto; }
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.14fr) minmax(320px, .86fr); gap: 12px; margin-top: 28px; }
-.chart-card, .category-card, .recent-card, .insight-card { padding: 21px; }
+.chart-card, .category-card, .recent-card { padding: 21px; }
 .chart-wrap { position: relative; height: 205px; margin-top: 8px; }
 .chart-plot { position: relative; height: 175px; }
 .chart-svg { position: absolute; inset: 0; display: block; width: 100%; height: 175px; overflow: visible; }
 .chart-grid-line { stroke: var(--line-soft); stroke-width: 1; }
 .chart-area { fill: var(--chart-area-fill); }
 .chart-line { fill: none; stroke: var(--orange); stroke-width: 2; vector-effect: non-scaling-stroke; }
-.chart-point { position: absolute; width: 8px; height: 8px; border: 2px solid var(--orange); border-radius: 50%; background: var(--card); pointer-events: none; transform: translate(-50%, -50%); }
-.chart-point[role="button"] { pointer-events: auto; cursor: pointer; }
-.chart-point:focus-visible { outline: 2px solid var(--orange); outline-offset: 3px; }
+.chart-point { position: absolute; width: 8px; height: 8px; padding: 0; border: 2px solid var(--orange); border-radius: 50%; background: var(--card); transform: translate(-50%, -50%); }
+/* Invisible 26px hit area so the point stays tappable on touch screens. */
+.chart-point::before { position: absolute; content: ""; inset: -9px; border-radius: 50%; }
 .chart-tooltip { position: absolute; z-index: 2; display: flex; min-width: 128px; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--card); color: var(--body); font-family: var(--mono); font-size: 10px; line-height: 1.35; pointer-events: none; transform: translate(-50%, calc(-100% - 12px)); }
 .chart-tooltip.edge-left { transform: translate(0, calc(-100% - 12px)); }
 .chart-tooltip.edge-right { transform: translate(-100%, calc(-100% - 12px)); }
@@ -589,8 +583,7 @@ textarea.form-control { min-height: 82px; resize: vertical; }
   .budget-prompt, .readonly-banner, .settle-panel, .summary-head, .subscription-toolbar { align-items: flex-start; flex-direction: column; }
   .inline-budget { width: 100%; min-width: 0; }
   .inline-budget input { flex: 1; width: auto; }
-  .budget-pace { min-width: 0; text-align: left; }
-  .chart-card, .category-card, .recent-card, .insight-card, .review-card, .settings-card { padding: 17px; }
+  .chart-card, .category-card, .recent-card, .review-card, .settings-card { padding: 17px; }
   .calendar-card .section-heading { align-items: flex-start; flex-direction: column; gap: 9px; }
   .calendar-day { min-height: 64px; padding: 8px; }
   .calendar-weekdays, .daily-calendar { gap: 4px; }
@@ -631,4 +624,20 @@ textarea.form-control { min-height: 82px; resize: vertical; }
     scroll-behavior: auto !important;
   }
   .loading::before { border-top-color: var(--orange); animation: none !important; }
+}
+
+/* Respect the OS "reduce motion" setting: keep the spinner readable but slow,
+   and drop the decorative transitions/animations everywhere else. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .loading::before {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
+  }
 }

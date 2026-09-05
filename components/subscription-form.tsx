@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { apiFetch, errorMessage } from "@/lib/api-client";
 import { CategoryDTO, SubscriptionDTO } from "@/lib/types";
 import { Icon } from "@/components/icon";
 import { ModalDialog } from "@/components/modal-dialog";
@@ -33,16 +34,13 @@ export function SubscriptionForm({ categories, subscription, defaultMonth, onClo
     }
     setSaving(true);
     try {
-      const response = await fetch(subscription ? `/api/subscriptions/${subscription.id}` : "/api/subscriptions", {
+      await apiFetch(subscription ? `/api/subscriptions/${subscription.id}` : "/api/subscriptions", {
         method: subscription ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, amount, billingDay: Number(billingDay), categoryId, startMonth, endMonth: endMonth || null, active: subscription?.active ?? true, note }),
+        json: { name, amount, billingDay: Number(billingDay), categoryId, startMonth, endMonth: endMonth || null, active: subscription?.active ?? true, note },
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.error || "保存失败，请稍后再试");
       onSaved();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "保存失败，请稍后再试");
+      setError(errorMessage(saveError, "保存失败，请稍后再试"));
     } finally {
       setSaving(false);
     }

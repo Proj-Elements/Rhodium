@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handleApiError, parseJsonBody } from "@/lib/api";
+import { handleApiError, MAX_IMPORT_BODY_BYTES, parseJsonBody } from "@/lib/api";
 import { monthKey, monthStart } from "@/lib/domain";
 import {
   normalizeRow,
@@ -16,15 +16,23 @@ import { conflict } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultCategories } from "@/lib/seed";
 import { importSchema, type BackupPayload } from "@/lib/validation";
-import { isMonthLocked } from "@/lib/summary";
+import { getLockedMonths } from "@/lib/summary";
 import { CategoryType, TransactionType, type Category, type Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
 type Tx = Prisma.TransactionClient;
 
+const CREATE_CHUNK = 500;
+const UPSERT_CHUNK = 25;
 /** Long enough for a 5000-row restore, bounded so a stuck import cannot pin a connection. */
 const IMPORT_TRANSACTION_OPTIONS = { timeout: 120_000, maxWait: 15_000 } as const;
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const batches: T[][] = [];
+  for (let index = 0; index < items.length; index += size) batches.push(items.slice(index, index + size));
+  return batches;
+}
 
 /**
  * Backup ids are *correlation* keys only: they line up rows inside one payload
@@ -188,7 +196,7 @@ function usableFor(category: Category | undefined, wanted: CategoryType): Catego
 
 export async function POST(request: Request) {
   try {
-    const body = importSchema.parse(await parseJsonBody(request));
+    const body = importSchema.parse(await parseJsonBody(request, MAX_IMPORT_BODY_BYTES));
 
     // Parse + validate every row up front so failures happen before any write.
     let normalizedRows: NormalizedRow[];
@@ -214,10 +222,7 @@ export async function POST(request: Request) {
           monthKey(item.occurredOn),
         )
       : [];
-    const months = [...new Set([...targetMonths, ...existingMonths])];
-    const lockedMonths = (await Promise.all(months.map(async (month) => ({ month, locked: await isMonthLocked(month) }))))
-      .filter((item) => item.locked)
-      .map((item) => item.month);
+    const lockedMonths = await getLockedMonths([...new Set([...targetMonths, ...existingMonths])]);
     if (lockedMonths.length) throw conflict(`${lockedMonths.sort().join("、")} 已结算，请先重新打开后再导入`);
 
     await ensureDefaultCategories();
@@ -291,6 +296,7 @@ export async function POST(request: Request) {
       const takenKeys = await reconcileOccurrenceKeys(tx, wantedKeys);
 
       const inserts: Prisma.TransactionCreateManyInput[] = [];
+      const keyedRows: { id: string; data: Omit<Prisma.TransactionCreateManyInput, "id"> }[] = [];
       const seenKeys = new Set<string>();
       for (const item of prepared) {
         const key = item.data.subscriptionOccurrenceKey;
@@ -298,20 +304,20 @@ export async function POST(request: Request) {
         // skip instead of failing the restore or double-counting the expense.
         if (key && (takenKeys.has(key) || seenKeys.has(key))) continue;
         if (key) seenKeys.add(key);
-        if (item.externalId) {
-          await tx.transaction.upsert({
-            where: { id: item.externalId },
-            create: { id: item.externalId, ...item.data },
-            update: item.data,
-          });
-          imported += 1;
-        } else {
-          inserts.push(item.data);
-        }
+        // Rows carrying an id must keep upsert semantics: delete+create would
+        // reset createdAt, which the transaction list uses as a tiebreaker.
+        if (item.externalId) keyedRows.push({ id: item.externalId, data: item.data });
+        else inserts.push(item.data);
       }
-      if (inserts.length) {
-        const result = await tx.transaction.createMany({ data: inserts });
+      for (const batch of chunk(inserts, CREATE_CHUNK)) {
+        const result = await tx.transaction.createMany({ data: batch });
         imported += result.count;
+      }
+      for (const batch of chunk(keyedRows, UPSERT_CHUNK)) {
+        await Promise.all(
+          batch.map((row) => tx.transaction.upsert({ where: { id: row.id }, create: { id: row.id, ...row.data }, update: row.data })),
+        );
+        imported += batch.length;
       }
 
     }, IMPORT_TRANSACTION_OPTIONS);

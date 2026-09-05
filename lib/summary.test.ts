@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 
 /**
- * `resolveMonthBudget` is the single entry point for a month's effective budget, and
+ * `resolveBudget` is the single entry point for a month's effective budget, and
  * `getMonthSummary` feeds both the monthly review and the settlement snapshot. Before
  * the fix, the summary read `prisma.monthlyBudget` directly and reported "no budget"
  * for months covered only by the preset — the settlement then froze that as 0 forever.
@@ -19,7 +19,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 const { prisma } = await import("@/lib/prisma");
-const { resolveMonthBudget } = await import("@/lib/budget");
+const { resolveBudget } = await import("@/lib/budget");
 const { getMonthSummary } = await import("@/lib/summary");
 
 // Plain Mock handles: the production code reads narrow `select` projections, so the
@@ -61,25 +61,25 @@ beforeEach(() => {
   findSettlement.mockResolvedValue(null);
 });
 
-describe("resolveMonthBudget", () => {
+describe("resolveBudget", () => {
   it("prefers the explicit month row over the preset", async () => {
     monthlyBudget.mockResolvedValue({ amountCents: 300_000 });
     budgetPreset.mockResolvedValue({ id: 1, amountCents: 200_000 });
-    await expect(resolveMonthBudget(MONTH)).resolves.toEqual({ amountCents: 300_000, source: "month" });
+    await expect(resolveBudget(MONTH)).resolves.toEqual({ amountCents: 300_000, source: "month" });
   });
 
   it("falls back to the preset when the month has no explicit budget", async () => {
     budgetPreset.mockResolvedValue({ id: 1, amountCents: 200_000 });
-    await expect(resolveMonthBudget(MONTH)).resolves.toEqual({ amountCents: 200_000, source: "preset" });
+    await expect(resolveBudget(MONTH)).resolves.toEqual({ amountCents: 200_000, source: "preset" });
   });
 
   it("reports no budget when neither exists", async () => {
-    await expect(resolveMonthBudget(MONTH)).resolves.toEqual({ amountCents: null, source: "none" });
+    await expect(resolveBudget(MONTH)).resolves.toEqual({ amountCents: null, source: "none" });
   });
 
   it("treats a zero preset as a real budget rather than as missing", async () => {
     budgetPreset.mockResolvedValue({ id: 1, amountCents: 0 });
-    await expect(resolveMonthBudget(MONTH)).resolves.toEqual({ amountCents: 0, source: "preset" });
+    await expect(resolveBudget(MONTH)).resolves.toEqual({ amountCents: 0, source: "preset" });
   });
 });
 

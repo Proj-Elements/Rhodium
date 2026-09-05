@@ -1,181 +1,178 @@
 import { describe, expect, it } from "vitest";
-import { serializeCategory, serializeSettlement, serializeTransaction } from "@/lib/serializers";
-import { serializeSubscription } from "@/lib/subscription-serializer";
+import { serializeCategory, serializeSettlement, serializeTransaction, transactionInclude } from "@/lib/serializers";
+import { serializeSubscription, subscriptionInclude } from "@/lib/subscription-serializer";
+import type { Category, Transaction } from "@prisma/client";
 
-/**
- * The serializers are the only boundary between Prisma rows and the JSON the
- * client receives, so these tests assert the *exact* key set: an accidental
- * spread would leak deletedAt / subscriptionOccurrenceKey / timestamps.
- */
-
-const categoryRow = {
+const category: Category = {
   id: "cat_1",
   name: "餐饮",
-  type: "EXPENSE" as const,
-  isSystem: true,
-  sortOrder: 10,
+  type: "EXPENSE",
+  isSystem: false,
+  sortOrder: 3,
   archivedAt: null,
-  createdAt: new Date("2025-01-01T00:00:00.000Z"),
-  updatedAt: new Date("2025-02-02T03:04:05.000Z"),
+  createdAt: new Date("2024-01-01T00:00:00.000Z"),
+  updatedAt: new Date("2024-01-02T00:00:00.000Z"),
 };
 
-describe("serializeCategory", () => {
-  it("exposes only the DTO fields", () => {
-    expect(serializeCategory(categoryRow)).toEqual({
-      id: "cat_1",
-      name: "餐饮",
-      type: "EXPENSE",
-      isSystem: true,
-      sortOrder: 10,
-      archivedAt: null,
-    });
-  });
-
-  it("renders archivedAt as a date-only key", () => {
-    const archived = serializeCategory({ ...categoryRow, archivedAt: new Date("2025-09-04T15:30:00.000Z") });
-    expect(archived.archivedAt).toBe("2025-09-04");
-  });
-});
+const transaction: Transaction & { category: Category; subscription: { name: string } | null } = {
+  id: "txn_1",
+  type: "EXPENSE",
+  amountCents: 1234,
+  occurredOn: new Date("2024-03-10T00:00:00.000Z"),
+  categoryId: category.id,
+  note: "午饭",
+  source: "MANUAL",
+  subscriptionId: null,
+  subscriptionMonth: null,
+  subscriptionOccurrenceKey: null,
+  deletedAt: new Date("2024-03-11T00:00:00.000Z"),
+  createdAt: new Date("2024-03-10T01:00:00.000Z"),
+  updatedAt: new Date("2024-03-10T02:00:00.000Z"),
+  category,
+  subscription: null,
+};
 
 describe("serializeTransaction", () => {
-  const transactionRow = {
-    id: "txn_1",
-    type: "EXPENSE" as const,
-    amountCents: 1250,
-    occurredOn: new Date("2026-09-04T00:00:00.000Z"),
-    categoryId: "cat_1",
-    category: categoryRow,
-    note: "午饭",
-    source: "SUBSCRIPTION" as const,
-    subscriptionId: "sub_1",
-    subscriptionMonth: new Date("2026-09-01T00:00:00.000Z"),
-    subscription: { name: "网易云音乐" },
-    subscriptionOccurrenceKey: "sub_1:2026-09",
-    deletedAt: new Date("2026-09-05T00:00:00.000Z"),
-    createdAt: new Date("2026-09-04T01:00:00.000Z"),
-    updatedAt: new Date("2026-09-04T02:00:00.000Z"),
-  };
-
-  it("whitelists fields and keeps amounts in integer cents", () => {
-    expect(serializeTransaction(transactionRow)).toEqual({
+  it("maps a manual transaction onto the DTO", () => {
+    expect(serializeTransaction(transaction)).toEqual({
       id: "txn_1",
       type: "EXPENSE",
-      amountCents: 1250,
-      occurredOn: "2026-09-04",
-      category: {
-        id: "cat_1",
-        name: "餐饮",
-        type: "EXPENSE",
-        isSystem: true,
-        sortOrder: 10,
-        archivedAt: null,
-      },
+      amountCents: 1234,
+      occurredOn: "2024-03-10",
+      category: serializeCategory(category),
       note: "午饭",
-      source: "SUBSCRIPTION",
-      subscriptionId: "sub_1",
-      subscriptionMonth: "2026-09-01",
-      subscription: { name: "网易云音乐" },
-    });
-  });
-
-  it("never leaks internal bookkeeping fields", () => {
-    const keys = Object.keys(serializeTransaction(transactionRow));
-    expect(keys).not.toContain("deletedAt");
-    expect(keys).not.toContain("subscriptionOccurrenceKey");
-    expect(keys).not.toContain("createdAt");
-    expect(keys).not.toContain("updatedAt");
-    expect(keys).not.toContain("categoryId");
-  });
-
-  it("nulls the optional subscription fields for manual entries", () => {
-    const manual = serializeTransaction({
-      ...transactionRow,
       source: "MANUAL",
       subscriptionId: null,
       subscriptionMonth: null,
       subscription: null,
-      subscriptionOccurrenceKey: null,
     });
-    expect(manual.subscriptionId).toBeNull();
-    expect(manual.subscriptionMonth).toBeNull();
-    expect(manual.subscription).toBeNull();
+  });
+
+  it("never leaks internal columns to the client", () => {
+    const dto = serializeTransaction(transaction) as Record<string, unknown>;
+    for (const field of ["deletedAt", "createdAt", "updatedAt", "subscriptionOccurrenceKey", "categoryId"]) {
+      expect(dto).not.toHaveProperty(field);
+    }
+  });
+
+  it("keeps the subscription name and month for generated rows", () => {
+    const dto = serializeTransaction({
+      ...transaction,
+      source: "SUBSCRIPTION",
+      subscriptionId: "sub_1",
+      subscriptionMonth: new Date("2024-03-01T00:00:00.000Z"),
+      subscription: { name: "视频会员" },
+    });
+    expect(dto.subscriptionMonth).toBe("2024-03-01");
+    expect(dto.subscription).toEqual({ name: "视频会员" });
+  });
+});
+
+describe("serializeCategory", () => {
+  it("omits timestamps and reports a null archivedAt", () => {
+    expect(serializeCategory(category)).toEqual({
+      id: "cat_1",
+      name: "餐饮",
+      type: "EXPENSE",
+      isSystem: false,
+      sortOrder: 3,
+      archivedAt: null,
+    });
+  });
+
+  it("serializes archivedAt as a full ISO timestamp, not a UTC date", () => {
+    // A Shanghai-evening archive lands on the previous UTC day; truncating to a
+    // date key would show the wrong day, so the full instant is preserved.
+    const archivedAt = new Date("2024-03-10T16:30:00.000Z");
+    expect(serializeCategory({ ...category, archivedAt }).archivedAt).toBe("2024-03-10T16:30:00.000Z");
   });
 });
 
 describe("serializeSettlement", () => {
-  const settlementRow = {
-    id: "stl_1",
-    month: new Date("2026-09-01T00:00:00.000Z"),
-    budgetAmountCents: 200000,
-    expenseAmountCents: 143210,
-    incomeAmountCents: 50000,
-    remainingAmountCents: 56790,
-    settledAt: new Date("2026-10-01T02:03:04.000Z"),
-    reopenedAt: null,
-  };
-
-  it("maps month to a date key and timestamps to ISO strings", () => {
-    expect(serializeSettlement(settlementRow)).toEqual({
-      id: "stl_1",
-      month: "2026-09-01",
-      budgetAmountCents: 200000,
-      expenseAmountCents: 143210,
-      incomeAmountCents: 50000,
-      remainingAmountCents: 56790,
-      settledAt: "2026-10-01T02:03:04.000Z",
+  it("reduces the month to a date key and keeps timestamps in full", () => {
+    expect(
+      serializeSettlement({
+        id: "set_1",
+        month: new Date("2024-03-01T00:00:00.000Z"),
+        budgetAmountCents: 300_000,
+        expenseAmountCents: 120_000,
+        incomeAmountCents: 10_000,
+        remainingAmountCents: 180_000,
+        settledAt: new Date("2024-04-01T10:00:00.000Z"),
+        reopenedAt: null,
+      }),
+    ).toEqual({
+      id: "set_1",
+      month: "2024-03-01",
+      budgetAmountCents: 300_000,
+      expenseAmountCents: 120_000,
+      incomeAmountCents: 10_000,
+      remainingAmountCents: 180_000,
+      settledAt: "2024-04-01T10:00:00.000Z",
       reopenedAt: null,
     });
   });
 
-  it("keeps a null remaining amount distinct from zero", () => {
-    const noBudget = serializeSettlement({ ...settlementRow, remainingAmountCents: null });
-    expect(noBudget.remainingAmountCents).toBeNull();
-  });
-
-  it("serializes reopenedAt when the month was reopened", () => {
-    const reopened = serializeSettlement({ ...settlementRow, reopenedAt: new Date("2026-10-02T00:00:00.000Z") });
-    expect(reopened.reopenedAt).toBe("2026-10-02T00:00:00.000Z");
+  it("passes a reopened settlement through", () => {
+    const dto = serializeSettlement({
+      id: "set_1",
+      month: new Date("2024-03-01T00:00:00.000Z"),
+      budgetAmountCents: 0,
+      expenseAmountCents: 0,
+      incomeAmountCents: 0,
+      remainingAmountCents: null,
+      settledAt: new Date("2024-04-01T10:00:00.000Z"),
+      reopenedAt: new Date("2024-04-02T10:00:00.000Z"),
+    });
+    expect(dto.reopenedAt).toBe("2024-04-02T10:00:00.000Z");
+    expect(dto.remainingAmountCents).toBeNull();
   });
 });
 
 describe("serializeSubscription", () => {
-  const subscriptionRow = {
+  const subscription = {
     id: "sub_1",
-    name: "网易云音乐",
-    amountCents: 800,
-    billingDay: 31,
-    categoryId: "cat_1",
-    startMonth: new Date("2026-09-01T00:00:00.000Z"),
-    endMonth: null,
+    name: "视频会员",
+    amountCents: 2500,
+    billingDay: 8,
+    categoryId: category.id,
+    startMonth: new Date("2024-03-01T00:00:00.000Z"),
+    endMonth: null as Date | null,
     active: true,
-    note: null,
-    category: categoryRow,
+    note: null as string | null,
+    category,
   };
 
-  it("reduces the month columns to YYYY-MM keys", () => {
-    expect(serializeSubscription(subscriptionRow)).toEqual({
+  it("reduces months to YYYY-MM", () => {
+    expect(serializeSubscription(subscription)).toMatchObject({ startMonth: "2024-03", endMonth: null });
+  });
+
+  it("serializes an end month when present", () => {
+    const dto = serializeSubscription({ ...subscription, endMonth: new Date("2024-12-01T00:00:00.000Z") });
+    expect(dto.endMonth).toBe("2024-12");
+  });
+
+  it("exposes only the DTO fields", () => {
+    // The whitelist assertion: an accidental spread would leak subscription
+    // bookkeeping columns or category timestamps into the client payload.
+    expect(serializeSubscription(subscription)).toEqual({
       id: "sub_1",
-      name: "网易云音乐",
-      amountCents: 800,
-      billingDay: 31,
+      name: "视频会员",
+      amountCents: 2500,
+      billingDay: 8,
       categoryId: "cat_1",
-      category: {
-        id: "cat_1",
-        name: "餐饮",
-        type: "EXPENSE",
-        isSystem: true,
-        sortOrder: 10,
-        archivedAt: null,
-      },
-      startMonth: "2026-09",
+      category: serializeCategory(category),
+      startMonth: "2024-03",
       endMonth: null,
       active: true,
       note: null,
     });
   });
+});
 
-  it("serializes endMonth when the subscription is bounded", () => {
-    const bounded = serializeSubscription({ ...subscriptionRow, endMonth: new Date("2026-12-01T00:00:00.000Z") });
-    expect(bounded.endMonth).toBe("2026-12");
+describe("shared include shapes", () => {
+  it("requests exactly the relations the DTOs need", () => {
+    expect(transactionInclude).toEqual({ category: true, subscription: { select: { name: true } } });
+    expect(subscriptionInclude).toEqual({ category: true });
   });
 });

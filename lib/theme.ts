@@ -36,3 +36,13 @@ export function systemPrefersDark(): boolean {
 export function schemeForMode(mode: ColorMode): "light" | "dark" {
   return mode === "system" ? (systemPrefersDark() ? "dark" : "light") : mode;
 }
+
+/**
+ * Next mode for the compact single-button cycle used on mobile. From "system"
+ * it jumps to the opposite of whatever the OS currently shows, so the first tap
+ * always produces a visible change; then dark -> system, light -> dark.
+ */
+export function nextColorMode(mode: ColorMode, systemDark: boolean): ColorMode {
+  if (mode === "system") return systemDark ? "light" : "dark";
+  return mode === "light" ? "dark" : "system";
+}
