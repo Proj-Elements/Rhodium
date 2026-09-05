@@ -21,6 +21,7 @@ export default function SettingsPage() {
   const [categoryType, setCategoryType] = useState("expense");
   const [entryDateMode, setEntryDateMode] = useState("today");
   const [importRows, setImportRows] = useState<Record<string, unknown>[] | null>(null);
+  const [importFormat, setImportFormat] = useState<"json" | "csv">("json");
   const [backupPayload, setBackupPayload] = useState<Record<string, unknown> | undefined>(undefined);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [importing, setImporting] = useState(false);
@@ -112,10 +113,11 @@ export default function SettingsPage() {
       } else {
         rows = parseCsv(text);
       }
-      if (!rows.length) throw new Error("文件中没有可导入的账目");
-      const format = file.name.toLowerCase().endsWith(".json") ? "json" : "csv";
+      if (!rows.length && !backup) throw new Error("文件中没有可导入的内容");
+      const format: "json" | "csv" = file.name.toLowerCase().endsWith(".json") ? "json" : "csv";
       const result = await apiFetch<ImportPreview>("/api/import/preview", { method: "POST", json: { format, rows } });
       setImportRows(rows);
+      setImportFormat(format);
       setBackupPayload(backup);
       setPreview(result);
     } catch (fileError) {
@@ -192,7 +194,7 @@ export default function SettingsPage() {
     if (!importRows || !preview || preview.errors.length) return;
     setImporting(true);
     try {
-      const result = await apiFetch<{ imported: number }>("/api/import", { method: "POST", json: { format: "json", rows: importRows, backup: backupPayload } });
+      const result = await apiFetch<{ imported: number }>("/api/import", { method: "POST", json: { format: importFormat, rows: importRows, backup: backupPayload } });
       cancelImport();
       flash(`已导入 ${result.imported} 条记录`);
     } catch (importError) {
@@ -213,7 +215,7 @@ export default function SettingsPage() {
         <div className="budget-setting-row"><div className="budget-setting-copy"><strong>调整本月和以后每个月</strong><span>从 {currentMonth} 起，每个月都写入这个金额</span></div><div className="budget-setting-input"><input className="form-control" inputMode="decimal" aria-label="以后每月预算金额" placeholder="例如 2500" value={futureBudgetInput} onChange={(event) => setFutureBudgetInput(event.target.value)} /><button type="button" className="button button-secondary button-small" onClick={() => void saveFutureBudgets()} disabled={budgetSaving}>应用</button></div></div>
       </section>
       <section className="card settings-card"><p className="card-label">PREFERENCES</p><h2>记账偏好</h2><p>让每次打开记账表单时，都更接近你的习惯。</p><label className="form-label" htmlFor="date-mode">默认记账日期</label><select id="date-mode" className="form-control" value={entryDateMode} onChange={(event) => changeDateMode(event.target.value)}><option value="today">今天</option><option value="last">上次使用的日期</option></select><div className="settings-meta"><span>人民币（CNY）</span><i className="settings-meta-dot" /><span>Asia/Shanghai</span></div></section>
-      <section className="card settings-card"><p className="card-label">PORTABILITY</p><h2>数据带走</h2><p>定期导出一份备份，长时间使用更安心。</p><div className="data-actions"><a className="button button-secondary button-small" href="/api/export?format=json"><Icon name="download" size={14} />JSON 完整备份</a><a className="button button-secondary button-small" href="/api/export?format=csv"><Icon name="download" size={14} />CSV 账目</a></div><div className="import-box"><label htmlFor="import-file"><Icon name="upload" size={15} />选择 JSON / CSV 导入<input id="import-file" type="file" accept=".json,.csv,application/json,text/csv" onChange={(event) => void handleFile(event)} /></label>{preview && <div className={`import-summary ${preview.errors.length ? "error" : "success"}`}><strong>{preview.errors.length ? "文件需要修正" : "文件检查通过"}</strong><div>{preview.valid} / {preview.total} 条记录可导入</div>{preview.errors.length > 0 && <ul className="import-errors">{preview.errors.slice(0, 5).map((item) => <li key={item}>{item}</li>)}</ul>}<div className="import-actions">{preview.errors.length === 0 && <button type="button" className="button button-primary button-small" onClick={() => void confirmImport()} disabled={importing}>{importing ? "导入中…" : "确认导入"}</button>}<button type="button" className="button button-quiet button-small" onClick={cancelImport}>取消</button></div></div>}</div></section>
+      <section className="card settings-card"><p className="card-label">PORTABILITY</p><h2>数据带走</h2><p>定期导出一份备份，长时间使用更安心。</p><div className="data-actions"><a className="button button-secondary button-small" href="/api/export?format=json"><Icon name="download" size={14} />JSON 完整备份</a><a className="button button-secondary button-small" href="/api/export?format=csv"><Icon name="download" size={14} />CSV 账目</a></div><div className="import-box"><p className="field-hint">CSV 行一律作为新账目写入：重复导入同一份 CSV 会重复入账；整体还原账本请用 JSON 完整备份。</p><label htmlFor="import-file"><Icon name="upload" size={15} />选择 JSON / CSV 导入<input id="import-file" type="file" accept=".json,.csv,application/json,text/csv" onChange={(event) => void handleFile(event)} /></label>{preview && <div className={`import-summary ${preview.errors.length ? "error" : "success"}`}><strong>{preview.errors.length ? "文件需要修正" : "文件检查通过"}</strong><div>{preview.valid} / {preview.total} 条记录可导入</div>{preview.errors.length > 0 && <ul className="import-errors">{preview.errors.slice(0, 5).map((item) => <li key={item}>{item}</li>)}</ul>}<div className="import-actions">{preview.errors.length === 0 && <button type="button" className="button button-primary button-small" onClick={() => void confirmImport()} disabled={importing}>{importing ? "导入中…" : "确认导入"}</button>}<button type="button" className="button button-quiet button-small" onClick={cancelImport}>取消</button></div></div>}</div></section>
       <section className="card settings-card full"><p className="card-label">CATEGORIES</p><h2>分类管理</h2><p>系统分类不能停用；自定义分类停用后，历史账目仍会保留。</p>{loading ? <div className="loading" style={{ minHeight: 100 }}>正在读取分类…</div> : <><div className="category-list">{categories.map((category) => <div className={`category-chip${category.archivedAt ? " archived" : ""}`} key={category.id}><span>{category.name}</span><span className="chip-type">{category.type === "BOTH" ? "通用" : category.type === "EXPENSE" ? "支出" : "收入"}</span>{!category.isSystem && <button type="button" className="icon-button" onClick={() => void archiveCategory(category)} aria-label={category.archivedAt ? "启用分类" : "停用分类"} title={category.archivedAt ? "启用分类" : "停用分类"}><Icon name={category.archivedAt ? "check" : "close"} size={12} /></button>}</div>)}</div><form className="add-category" onSubmit={addCategory}><input className="form-control" style={{ maxWidth: 230 }} placeholder="新分类名称" value={newCategory} onChange={(event) => setNewCategory(event.target.value)} /><select className="form-control" style={{ maxWidth: 120 }} value={categoryType} onChange={(event) => setCategoryType(event.target.value)}><option value="expense">支出</option><option value="income">收入</option><option value="both">通用</option></select><button className="button button-secondary" type="submit"><Icon name="plus" size={15} />添加分类</button></form></>}</section>
     </div>
     {message && <Toast message={message} />}

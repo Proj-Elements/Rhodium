@@ -136,6 +136,9 @@ export type BackupPayload = z.infer<typeof backupSchema>;
 
 export const importSchema = z.object({
   format: z.enum(["json", "csv"]),
-  rows: z.array(z.record(z.unknown())).min(1).max(5000),
+  // Empty row lists are legal: a full backup may only carry categories,
+  // subscriptions, budgets or settlements. The real ceiling on a payload is
+  // the 8 MB body limit; this cap just bounds the row-loop work inside.
+  rows: z.array(z.record(z.unknown())).max(20_000),
   backup: backupSchema.optional(),
 });

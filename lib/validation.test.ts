@@ -205,12 +205,12 @@ describe("category schemas", () => {
 });
 
 describe("importSchema", () => {
-  it("requires at least one row, caps the batch at 5000, and rejects unknown formats", () => {
+  it("allows an empty row list (backup-only restore), caps the batch at 20000, and rejects unknown formats", () => {
     const row = { date: "2024-03-01" };
-    expect(importSchema.safeParse({ format: "csv", rows: [] }).success).toBe(false);
+    expect(importSchema.safeParse({ format: "csv", rows: [] }).success).toBe(true);
     expect(importSchema.safeParse({ format: "csv", rows: [row] }).success).toBe(true);
-    expect(importSchema.safeParse({ format: "csv", rows: Array(5000).fill(row) }).success).toBe(true);
-    expect(importSchema.safeParse({ format: "csv", rows: Array(5001).fill(row) }).success).toBe(false);
+    expect(importSchema.safeParse({ format: "csv", rows: Array(20_000).fill(row) }).success).toBe(true);
+    expect(importSchema.safeParse({ format: "csv", rows: Array(20_001).fill(row) }).success).toBe(false);
     expect(importSchema.safeParse({ format: "xlsx", rows: [{}] }).success).toBe(false);
   });
 

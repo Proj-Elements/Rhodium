@@ -71,4 +71,13 @@ describe("import validation helpers", () => {
     expect(() => validateRowShallow({ occurredOn: "not-a-date", amount: "9.9" })).toThrow();
     expect(() => validateRowShallow({ occurredOn: "2025-09-01", amount: "x" })).toThrow();
   });
+
+  it("validateRowShallow accepts amountCents exactly like normalizeRow does", () => {
+    expect(() => validateRowShallow({ occurredOn: "2025-09-01", amountCents: 456 })).not.toThrow();
+    // The backup schema and normalizeRow both take string cents; the preview
+    // used to reject them, which disabled 确认导入 for valid files.
+    expect(() => validateRowShallow({ occurredOn: "2025-09-01", amountCents: "2500" })).not.toThrow();
+    expect(() => validateRowShallow({ occurredOn: "2025-09-01" })).toThrow("金额不能为空");
+    expect(() => validateRowShallow({ occurredOn: "2025-09-01", amountCents: "1.5" })).toThrow();
+  });
 });

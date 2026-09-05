@@ -124,14 +124,15 @@ export function normalizeRow(row: Row): NormalizedRow {
 }
 
 /**
- * Per-row validation for the preview endpoint: same date/amount/type rules as
- * `normalizeRow` but without building the full domain object.
+ * Per-row validation for the preview endpoint: must mirror `normalizeRow`
+ * exactly — a row the preview rejects still blocks the 确认导入 button in the
+ * UI, so any stricter rule silently makes valid files unimportable.
  */
 export function validateRowShallow(row: Row): void {
   const dateText = String(value(row, "occurredOn", "日期") ?? "");
   parseDateOnly(dateText);
   const rawAmount = value(row, "amount", "金额");
-  const amount = rawAmount !== undefined && rawAmount !== null && rawAmount !== "" ? rawAmount : typeof row.amountCents === "number" ? row.amountCents / 100 : "";
-  parseAmountToCents(amount);
+  if (rawAmount === undefined || rawAmount === null || rawAmount === "") parseCents(row.amountCents, "金额");
+  else parseAmountToCents(rawAmount);
   parseTransactionType(value(row, "type", "类型"));
 }
