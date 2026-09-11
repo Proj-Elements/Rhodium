@@ -10,6 +10,11 @@ type TransactionWithRelations = Transaction & {
   subscription: { name: string } | null;
 };
 
+/** 实际生效的金额列：报销的支出按 0 计入支出/预算，其余按原额。 */
+export function effectiveExpenseCents(transaction: { type: string; amountCents: number; reimbursedAt: Date | null }): number {
+  return transaction.type === "EXPENSE" && transaction.reimbursedAt ? 0 : transaction.amountCents;
+}
+
 /** Structural shape of the category fields the DTO needs (Prisma row or a narrowed select). */
 export type CategoryLike = {
   id: string;
@@ -34,6 +39,7 @@ export function serializeTransaction(transaction: TransactionWithRelations): Tra
     category: serializeCategory(transaction.category),
     note: transaction.note,
     source: transaction.source,
+    reimbursedAt: transaction.reimbursedAt ? transaction.reimbursedAt.toISOString() : null,
     subscriptionId: transaction.subscriptionId,
     subscriptionMonth: transaction.subscriptionMonth ? dateOnlyKey(transaction.subscriptionMonth) : null,
     subscription: transaction.subscription ? { name: transaction.subscription.name } : null,

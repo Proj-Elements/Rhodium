@@ -6,6 +6,7 @@ import {
   importSchema,
   subscriptionSchema,
   subscriptionToggleSchema,
+  transactionReimburseSchema,
   transactionRestoreSchema,
   transactionSchema,
 } from "@/lib/validation";
@@ -179,8 +180,18 @@ describe("strict toggle and restore bodies", () => {
     expect(transactionRestoreSchema.safeParse({ restore: true, amount: "1" }).success).toBe(false);
   });
 
+  it("accepts only reimburse: true and rejects extra keys", () => {
+    expect(transactionReimburseSchema.safeParse({ reimburse: true }).success).toBe(true);
+    expect(transactionReimburseSchema.safeParse({ reimburse: false }).success).toBe(false);
+    expect(transactionReimburseSchema.safeParse({ reimburse: true, amount: "1" }).success).toBe(false);
+  });
+
   it("does not mistake a full transaction body for a restore body", () => {
     expect(transactionRestoreSchema.safeParse(validTransaction).success).toBe(false);
+  });
+
+  it("does not mistake a full transaction body for a reimburse body", () => {
+    expect(transactionReimburseSchema.safeParse(validTransaction).success).toBe(false);
   });
 
   it("does not mistake a full subscription body for a toggle body", () => {

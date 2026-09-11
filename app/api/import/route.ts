@@ -254,6 +254,10 @@ export async function POST(request: Request) {
 
       const prepared = normalizedRows.map((row) => {
         const wantedType = row.type === TransactionType.EXPENSE ? CategoryType.EXPENSE : CategoryType.INCOME;
+        // 报销只对未删除的支出成立；收入行或已删除行的报销时间一律丢弃，
+        // 避免备份里手工编辑过的字段破坏聚合不变量。
+        const reimbursedAt =
+          row.type === TransactionType.EXPENSE && !row.deletedAt ? row.reimbursedAt : null;
         const mappedCategoryId = row.categoryId ? idMap.categories.get(row.categoryId) ?? row.categoryId : null;
         const category =
           usableFor(mappedCategoryId ? byId.get(mappedCategoryId) : undefined, wantedType) ??
@@ -283,6 +287,7 @@ export async function POST(request: Request) {
           subscriptionMonth,
           subscriptionOccurrenceKey: occurrenceKey,
           deletedAt: row.deletedAt,
+          reimbursedAt,
         };
         return { data, externalId: restoringBackup ? row.externalId : null };
       });

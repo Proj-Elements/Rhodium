@@ -26,6 +26,7 @@ const transaction: Transaction & { category: Category; subscription: { name: str
   subscriptionMonth: null,
   subscriptionOccurrenceKey: null,
   deletedAt: new Date("2024-03-11T00:00:00.000Z"),
+  reimbursedAt: null,
   createdAt: new Date("2024-03-10T01:00:00.000Z"),
   updatedAt: new Date("2024-03-10T02:00:00.000Z"),
   category,
@@ -42,10 +43,17 @@ describe("serializeTransaction", () => {
       category: serializeCategory(category),
       note: "午饭",
       source: "MANUAL",
+      reimbursedAt: null,
       subscriptionId: null,
       subscriptionMonth: null,
       subscription: null,
     });
+  });
+
+  it("exposes reimbursedAt as an ISO timestamp, and null when not reimbursed", () => {
+    const reimbursedAt = new Date("2024-03-20T08:30:00.000Z");
+    expect(serializeTransaction({ ...transaction, reimbursedAt }).reimbursedAt).toBe("2024-03-20T08:30:00.000Z");
+    expect(serializeTransaction({ ...transaction, reimbursedAt: null }).reimbursedAt).toBeNull();
   });
 
   it("never leaks internal columns to the client", () => {

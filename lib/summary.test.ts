@@ -37,6 +37,7 @@ type Row = {
   amountCents: number;
   type: "EXPENSE" | "INCOME";
   source: "MANUAL" | "SUBSCRIPTION";
+  reimbursedAt: Date | null;
   categoryId: string;
   category: { name: string };
 };
@@ -47,6 +48,7 @@ function row(overrides: Partial<Row> = {}): Row {
     amountCents: 1000,
     type: "EXPENSE",
     source: "MANUAL",
+    reimbursedAt: null,
     categoryId: "cat_food",
     category: { name: "餐饮" },
     ...overrides,
@@ -141,6 +143,51 @@ describe("getMonthSummary", () => {
 
     expect(summary.subscriptionExpenseCents).toBe(9_900);
     expect(summary.topCategory).toEqual({ name: "订阅", amountCents: 9_900 });
+  });
+
+  it("keeps reimbursed expenses in the ledger but out of the budget math", async () => {
+    findTransactions.mockResolvedValue([
+      row({ amountCents: 30_000 }),
+      row({ amountCents: 12_000, reimbursedAt: new Date("2024-01-20T00:00:00.000Z") }),
+      row({ amountCents: 5_000, type: "INCOME", categoryId: "cat_salary", category: { name: "工资" } }),
+    ]);
+
+    const summary = await getMonthSummary(MONTH);
+
+    // 账面支出包含报销，预算口径只算自付。
+    expect(summary.expenseCents).toBe(42_000);
+    expect(summary.outOfPocketCents).toBe(30_000);
+    expect(summary.reimbursedCents).toBe(12_000);
+    expect(summary.reimbursedCount).toBe(1);
+    // 报销属于回收，绝不计入收入。
+    expect(summary.incomeCents).toBe(5_000);
+    // 分类排行与单日峰值仍按全额支出排序。
+    expect(summary.topCategory).toEqual({ name: "餐饮", amountCents: 42_000 });
+    expect(summary.topDate).toEqual({ date: "2024-01-05", amountCents: 42_000 });
+  });
+
+  it("computes remaining and daily average from out-of-pocket amounts only", async () => {
+    budgetPreset.mockResolvedValue({ id: 1, amountCents: 20_000 });
+    findTransactions.mockResolvedValue([
+      row({ amountCents: 15_000 }),
+      row({ amountCents: 12_000, reimbursedAt: new Date("2024-01-20T00:00:00.000Z") }),
+    ]);
+
+    const summary = await getMonthSummary(MONTH);
+
+    expect(summary.remainingCents).toBe(5_000);
+    // 一月有 31 天：15000 / 31 ≈ 484。
+    expect(summary.dailyAverageCents).toBe(484);
+  });
+
+  it("reports zeros without any reimbursement", async () => {
+    findTransactions.mockResolvedValue([row({ amountCents: 30_000 })]);
+
+    const summary = await getMonthSummary(MONTH);
+
+    expect(summary.reimbursedCents).toBe(0);
+    expect(summary.reimbursedCount).toBe(0);
+    expect(summary.outOfPocketCents).toBe(30_000);
   });
 
   it("returns one calendar entry per day with only the active days filled in", async () => {

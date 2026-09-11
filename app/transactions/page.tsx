@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/app-shell";
 import { CategoryIcon, Icon } from "@/components/icon";
 import { MonthSwitcher } from "@/components/month-switcher";
+import { ReimburseDialog } from "@/components/reimburse-dialog";
 import { Toast, useFlash } from "@/components/toast";
 import { TransactionForm } from "@/components/transaction-form";
 import { apiFetch, errorMessage } from "@/lib/api-client";
@@ -40,6 +41,7 @@ export default function TransactionsPage() {
   const [readOnly, setReadOnly] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<TransactionDTO | null>(null);
+  const [reimbursing, setReimbursing] = useState<TransactionDTO | null>(null);
   const [undoId, setUndoId] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -173,6 +175,27 @@ export default function TransactionsPage() {
     return result;
   }, { expenseCents: 0, incomeCents: 0 }), [visibleTransactions]);
 
+  const reimbursableCount = useMemo(
+    () => visibleTransactions.filter((transaction) => transaction.type === "EXPENSE" && !transaction.reimbursedAt).length,
+    [visibleTransactions],
+  );
+
+  // 筛选范围内已报销的金额与笔数，让“已报销”摘要跟着当前筛选走。
+  const { reimbursedVisibleCents, reimbursedVisibleCount } = useMemo(
+    () =>
+      visibleTransactions.reduce(
+        (result, transaction) => {
+          if (transaction.reimbursedAt) {
+            result.reimbursedVisibleCents += transaction.amountCents;
+            result.reimbursedVisibleCount += 1;
+          }
+          return result;
+        },
+        { reimbursedVisibleCents: 0, reimbursedVisibleCount: 0 },
+      ),
+    [visibleTransactions],
+  );
+
   const activeCategories = categories.filter((category) => !category.archivedAt);
   const filtering = Boolean(search) || categoryFilter !== "all" || filter !== "all";
   const today = todayInShanghai();
@@ -203,20 +226,26 @@ export default function TransactionsPage() {
       <div className="summary-chip expense"><span>{filtering ? "筛选后支出" : "本月支出"}</span><strong>{formatMoney(totals.expenseCents)}</strong></div>
       <div className="summary-chip income"><span>{filtering ? "筛选后收入" : "本月收入"}</span><strong>+{formatMoney(totals.incomeCents)}</strong></div>
       <div className="summary-chip"><span>已显示</span><strong>{visibleTransactions.length} 笔</strong></div>
+      <div className="summary-chip reimburse"><span>已报销</span><strong>{formatMoney(reimbursedVisibleCents)} · {reimbursedVisibleCount} 笔</strong></div>
+      {reimbursableCount > 0 && !readOnly && <div className="summary-chip"><span>可报销</span><strong>{reimbursableCount} 笔</strong></div>}
     </div>
 
     {readOnly && <div className="readonly-banner"><div><strong>本月已结算，账目暂时只读</strong><span>重新打开本月后，才能添加、编辑或删除记录。</span></div><Link className="button button-secondary button-small" href={`/settlements?month=${month}`}>查看月度回顾 <Icon name="arrow" size={13} /></Link></div>}
     {loading ? <div className="loading">正在整理账目…</div> : error ? <div className="inline-error"><strong>{error}</strong><button className="button button-secondary button-small" onClick={reload}>再试一次</button></div> : grouped.length === 0 ? <div className="card empty-state"><strong>{transactions.length === 0 ? "这个月还没有记录" : "没有找到匹配的账目"}</strong><span>{transactions.length === 0 ? "记下一笔早餐、交通，或者一笔兼职收入。" : "试试换一个关键词、分类，或清除筛选。"}</span>{transactions.length === 0 && !readOnly && <button type="button" className="button button-primary button-small" onClick={openNew}><Icon name="plus" size={14} />记下第一笔</button>}</div> : grouped.map((group) => <section className="date-group" key={group.date}>
       <div className="date-group-title"><strong>{dateLabel(group.date)}</strong><span>{group.date}</span><span className="date-group-total">{group.expenseCents > 0 && <span className="expense">支出 {formatMoney(group.expenseCents)}</span>}{group.incomeCents > 0 && <span className="income"> · 收入 {formatMoney(group.incomeCents)}</span>}</span></div>
-      <div className="card ledger-card">{group.items.map((transaction) => { const palette = getCategoryColor(transaction.category.id); return <div className="ledger-row" key={transaction.id}>
+      <div className="card ledger-card">{group.items.map((transaction) => { const palette = getCategoryColor(transaction.category.id); const reimbursed = Boolean(transaction.reimbursedAt); return <div className={`ledger-row${reimbursed ? " reimbursed" : ""}`} key={transaction.id}>
         <span className={`transaction-symbol${transaction.type === "INCOME" ? " income-symbol" : " expense-symbol"}`} style={transaction.type === "INCOME" ? undefined : { color: palette.color, backgroundColor: palette.surface }}><CategoryIcon categoryName={transaction.category.name} type={transaction.type} size={16} /></span>
-        <div className="transaction-main"><strong>{transaction.note || transaction.category.name}{transaction.source === "SUBSCRIPTION" && <span className="source-badge">订阅自动记账</span>}</strong><span>{transaction.category.name}{transaction.subscription?.name ? ` · ${transaction.subscription.name}` : ""}</span></div>
+        <div className="transaction-main"><strong>{transaction.note || transaction.category.name}{transaction.source === "SUBSCRIPTION" && <span className="source-badge">订阅自动记账</span>}{reimbursed && <span className="source-badge reimburse-badge"><Icon name="coins" size={9} />已报销</span>}</strong><span>{transaction.category.name}{transaction.subscription?.name ? ` · ${transaction.subscription.name}` : ""}</span></div>
         <span className={`transaction-amount ${transaction.type === "INCOME" ? "income" : "expense"}`}>{transaction.type === "INCOME" ? "+" : "−"}{formatMoney(transaction.amountCents)}</span>
-        {!readOnly && <div className="ledger-actions"><button type="button" className="icon-button" onClick={() => setEditing(transaction)} aria-label={`编辑${transaction.note || transaction.category.name}`} title="编辑"><Icon name="edit" size={15} /></button><button type="button" className="icon-button danger" onClick={() => void remove(transaction)} disabled={deletingId === transaction.id} aria-label={`删除${transaction.note || transaction.category.name}`} title="删除"><Icon name="trash" size={15} /></button></div>}
+        {!readOnly && <div className="ledger-actions">
+          {transaction.type === "EXPENSE" && !reimbursed && <button type="button" className="icon-button" onClick={() => setReimbursing(transaction)} aria-label={`报销${transaction.note || transaction.category.name}`} title="报销"><Icon name="coins" size={15} /></button>}
+          <button type="button" className="icon-button" onClick={() => setEditing(transaction)} aria-label={`编辑${transaction.note || transaction.category.name}`} title="编辑"><Icon name="edit" size={15} /></button><button type="button" className="icon-button danger" onClick={() => void remove(transaction)} disabled={deletingId === transaction.id} aria-label={`删除${transaction.note || transaction.category.name}`} title="删除"><Icon name="trash" size={15} /></button>
+        </div>}
       </div>; })}</div>
     </section>)}
     {!loading && !error && grouped.length > 0 && <button type="button" className="button button-primary" onClick={openNew} disabled={readOnly}><Icon name="plus" size={16} />{readOnly ? "本月已锁定" : "添加一笔"}</button>}
     {(showForm || editing) && !readOnly && <TransactionForm categories={categories} transaction={editing} defaultDate={defaultEntryDate} onClose={() => { setShowForm(false); setEditing(null); }} onSaved={() => { setShowForm(false); setEditing(null); reload(); }} />}
+    {reimbursing && <ReimburseDialog transaction={reimbursing} onClose={() => setReimbursing(null)} onSaved={() => { setReimbursing(null); reload(); }} />}
     <div className="toast-stack">{undoId && <Toast message="记录已删除" action="撤销" onAction={() => void undo()} />}{message && <Toast message={message} />}</div>
   </AppShell>;
 }

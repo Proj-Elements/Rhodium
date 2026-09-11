@@ -12,6 +12,7 @@ import {
   Check,
   ChevronDown,
   Clock3,
+  Coins,
   Coffee,
   CupSoda,
   Download,
@@ -41,7 +42,7 @@ import {
   X,
 } from "lucide-react";
 
-export type IconName = "grid" | "receipt" | "repeat" | "calendar" | "settings" | "plus" | "arrow" | "download" | "upload" | "trash" | "edit" | "check" | "close" | "chevron" | "wallet" | "trend" | "coffee" | "target" | "spark" | "menu" | "income" | "expense" | "dots" | "clock" | "sun" | "moon" | "monitor";
+export type IconName = "grid" | "receipt" | "repeat" | "calendar" | "settings" | "plus" | "arrow" | "download" | "upload" | "trash" | "edit" | "check" | "close" | "chevron" | "wallet" | "trend" | "coffee" | "target" | "spark" | "menu" | "income" | "expense" | "dots" | "clock" | "sun" | "moon" | "monitor" | "coins";
 
 type CategoryType = "EXPENSE" | "INCOME";
 
@@ -70,6 +71,7 @@ const icons: Record<IconName, LucideIcon> = {
   expense: ArrowDownCircle,
   dots: MoreHorizontal,
   clock: Clock3,
+  coins: Coins,
   sun: Sun,
   moon: Moon,
   monitor: Monitor,

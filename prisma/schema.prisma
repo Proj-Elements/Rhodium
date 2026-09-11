@@ -53,6 +53,9 @@ model Transaction {
   subscriptionOccurrenceKey String?           @unique
   subscription              Subscription?     @relation(fields: [subscriptionId], references: [id])
   deletedAt                 DateTime?
+  /// 报销时间：已报销的支出保留在账本里，但不再计入本月支出与预算；
+  /// 置空即撤销报销。不建索引——聚合查询由 [type, deletedAt, occurredOn] 先收敛。
+  reimbursedAt              DateTime?
   createdAt                 DateTime          @default(now())
   updatedAt                 DateTime          @updatedAt
 
