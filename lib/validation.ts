@@ -65,11 +65,17 @@ export const transactionRestoreSchema = z
 
 /**
  * Reimburse-only PATCH body ({ reimburse: true }). Strict like the restore
- * body so extra fields cannot ride along; un-reimbursing goes through
- * transactionSchema instead so it cannot be confused with an edit.
+ * body so extra fields cannot ride along. Undoing a reimbursement has its own
+ * strict body too ({ unreimburse: true }) so it cannot be confused with an
+ * edit; a full edit still clears the stamp as before.
  */
 export const transactionReimburseSchema = z
   .object({ reimburse: z.literal(true) })
+  .strict();
+
+/** Un-reimburse-only PATCH body ({ unreimburse: true }). */
+export const transactionUnreimburseSchema = z
+  .object({ unreimburse: z.literal(true) })
   .strict();
 
 export const categorySchema = z.object({
