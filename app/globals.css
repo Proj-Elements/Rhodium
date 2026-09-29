@@ -62,6 +62,14 @@
   --mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local("JetBrains Mono"), local("JetBrainsMono-Regular"), url("/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+}
+
 /* Dark scheme: the boot script in layout.tsx sets data-color-scheme on <html>
    before first paint; use-color-mode keeps it in sync afterwards. */
 :root[data-color-scheme="dark"] {

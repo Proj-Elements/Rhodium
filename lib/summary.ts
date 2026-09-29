@@ -1,6 +1,7 @@
 import { TransactionType } from "@prisma/client";
 import { dateOnlyKey, daysInMonth, monthStart, todayInShanghai } from "@/lib/domain";
 import { prisma } from "@/lib/prisma";
+import { resolveBudgetCents } from "@/lib/budget";
 import { serializeSettlement } from "@/lib/serializers";
 
 export async function isMonthLocked(month: string) {
@@ -17,14 +18,15 @@ export async function getMonthSummary(month: string) {
   const nextStart = new Date(start);
   nextStart.setUTCMonth(nextStart.getUTCMonth() + 1);
 
-  const [budget, transactions, settlement] = await Promise.all([
-    prisma.monthlyBudget.findUnique({ where: { month: start } }),
+  const [budgetCents, transactions, settlement] = await Promise.all([
+    resolveBudgetCents(month),
     prisma.transaction.findMany({
       where: { deletedAt: null, occurredOn: { gte: start, lt: nextStart } },
       select: { occurredOn: true, amountCents: true, type: true, source: true, categoryId: true, category: { select: { name: true } } },
     }),
     prisma.monthlySettlement.findUnique({ where: { month: start } }),
   ]);
+  const budget = budgetCents === null ? null : { amountCents: budgetCents };
 
   let expenseCents = 0;
   let incomeCents = 0;
@@ -72,7 +74,7 @@ export async function getMonthSummary(month: string) {
     budgetCents: budget?.amountCents ?? null,
     expenseCents,
     incomeCents,
-    remainingCents: budget ? budget.amountCents - expenseCents : null,
+    remainingCents: budgetCents === null ? null : budgetCents - expenseCents,
     dailyAverageCents: expenseTransactionCount ? Math.round(expenseCents / Math.max(1, elapsedDays)) : 0,
     dailyBreakdown,
     topCategory,

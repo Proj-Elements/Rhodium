@@ -27,6 +27,7 @@ export function syncSubscriptions(referenceDate = todayInShanghai()) {
   lastSyncAt = now;
   lastSyncPromise = runSync(referenceDate).finally(() => {
     lastSyncPromise = null;
+    lastSyncAt = 0;
   });
   return lastSyncPromise;
 }

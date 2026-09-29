@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import Link from "next/link";
 
 export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
@@ -8,8 +9,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
   }, [error]);
 
   return (
-    <html lang="zh-CN">
-      <body style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--canvas, #f7f7f4)", color: "var(--ink, #26251e)", fontFamily: "system-ui, sans-serif" }}>
+    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "var(--canvas, #f7f7f4)", color: "var(--ink, #26251e)", fontFamily: "system-ui, sans-serif" }}>
         <div style={{ maxWidth: 420, padding: 32, textAlign: "center" }}>
           <h1 style={{ fontSize: 22, fontWeight: 600, margin: "0 0 12px" }}>页面出了点问题</h1>
           <p style={{ color: "var(--body, #5a5852)", fontSize: 14, lineHeight: 1.6, margin: "0 0 20px" }}>
@@ -24,7 +24,5 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
             </a>
           </div>
         </div>
-      </body>
-    </html>
-  );
+      );
 }
