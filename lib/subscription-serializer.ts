@@ -1,5 +1,5 @@
 import type { SubscriptionDTO } from "@/lib/types";
-import { serializeCategory } from "@/lib/serializers";
+import { serializeCategory, type CategoryLike } from "@/lib/serializers";
 
 const subscriptionInclude = { category: true } as const;
 
@@ -13,14 +13,7 @@ type SubscriptionWithCategory = {
   endMonth: Date | null;
   active: boolean;
   note: string | null;
-  category: {
-    id: string;
-    name: string;
-    type: "EXPENSE" | "INCOME" | "BOTH";
-    isSystem: boolean;
-    sortOrder: number;
-    archivedAt: Date | null;
-  };
+  category: CategoryLike;
 };
 
 /** Whitelist a Prisma Subscription into the client-facing SubscriptionDTO. */

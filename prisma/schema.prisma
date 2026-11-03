@@ -27,6 +27,7 @@ model Category {
   id            String         @id @default(cuid())
   name          String
   type          CategoryType   @default(EXPENSE)
+  icon          String?
   isSystem      Boolean        @default(false)
   sortOrder     Int            @default(0)
   archivedAt    DateTime?

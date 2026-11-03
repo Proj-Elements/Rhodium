@@ -27,6 +27,7 @@ export async function POST(request: Request) {
       data: {
         name: body.name,
         type: body.type === "expense" ? CategoryType.EXPENSE : body.type === "income" ? CategoryType.INCOME : CategoryType.BOTH,
+        icon: body.icon ?? null,
         isSystem: false,
         sortOrder: 100,
       },

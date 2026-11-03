@@ -7,6 +7,7 @@ const category: Category = {
   id: "cat_1",
   name: "餐饮",
   type: "EXPENSE",
+  icon: null,
   isSystem: false,
   sortOrder: 3,
   archivedAt: null,
@@ -74,6 +75,7 @@ describe("serializeCategory", () => {
       id: "cat_1",
       name: "餐饮",
       type: "EXPENSE",
+      icon: null,
       isSystem: false,
       sortOrder: 3,
       archivedAt: null,
@@ -85,6 +87,12 @@ describe("serializeCategory", () => {
     // date key would show the wrong day, so the full instant is preserved.
     const archivedAt = new Date("2024-03-10T16:30:00.000Z");
     expect(serializeCategory({ ...category, archivedAt }).archivedAt).toBe("2024-03-10T16:30:00.000Z");
+  });
+
+  it("keeps a selected icon in category and transaction DTOs", () => {
+    const selected = { ...category, icon: "coffee" };
+    expect(serializeCategory(selected).icon).toBe("coffee");
+    expect(serializeTransaction({ ...transaction, category: selected }).category.icon).toBe("coffee");
   });
 });
 
@@ -150,6 +158,10 @@ describe("serializeSubscription", () => {
   it("serializes an end month when present", () => {
     const dto = serializeSubscription({ ...subscription, endMonth: new Date("2024-12-01T00:00:00.000Z") });
     expect(dto.endMonth).toBe("2024-12");
+  });
+
+  it("keeps the chosen category icon", () => {
+    expect(serializeSubscription({ ...subscription, category: { ...category, icon: "coffee" } }).category.icon).toBe("coffee");
   });
 
   it("exposes only the DTO fields", () => {

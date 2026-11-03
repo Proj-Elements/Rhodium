@@ -20,6 +20,7 @@ export async function PATCH(request: Request, { params }: Context) {
       where: { id },
       data: {
         ...(typeof body.name === "string" ? { name: body.name } : {}),
+        ...(body.icon !== undefined ? { icon: body.icon } : {}),
         ...(typeof body.archived === "boolean" ? { archivedAt: body.archived ? new Date() : null } : {}),
       },
     });
