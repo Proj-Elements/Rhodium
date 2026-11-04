@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isColorMode, nextColorMode, schemeForMode } from "./theme";
+import { isColorMode, nextColorMode, schemeForMode, type ColorMode } from "./theme";
 
 describe("isColorMode", () => {
   it("accepts the three supported modes", () => {
@@ -34,18 +34,30 @@ describe("nextColorMode", () => {
     expect(nextColorMode("system", false)).toBe("dark");
   });
 
-  it("cycles light -> dark -> system regardless of the OS scheme", () => {
-    expect(nextColorMode("light", false)).toBe("dark");
-    expect(nextColorMode("light", true)).toBe("dark");
-    expect(nextColorMode("dark", false)).toBe("system");
-    expect(nextColorMode("dark", true)).toBe("system");
+  it.each([
+    { systemDark: false, cycle: ["system", "dark", "light"] as const },
+    { systemDark: true, cycle: ["system", "light", "dark"] as const },
+  ])("visits all three modes when systemDark is $systemDark", ({ systemDark, cycle }) => {
+    let mode: ColorMode = "system";
+    for (const expected of [...cycle.slice(1), "system"]) {
+      mode = nextColorMode(mode, systemDark);
+      expect(mode).toBe(expected);
+    }
   });
 
-  it("returns to the starting mode after a full cycle", () => {
-    const first = nextColorMode("system", false);
-    const second = nextColorMode(first, false);
-    expect(first).toBe("dark");
-    expect(second).toBe("system");
+  it("can reach every mode from a stored explicit choice in either OS scheme", () => {
+    for (const systemDark of [false, true]) {
+      for (const start of ["light", "dark"] as const) {
+        let mode: ColorMode = start;
+        const visited = new Set<ColorMode>();
+        for (let step = 0; step < 3; step += 1) {
+          visited.add(mode);
+          mode = nextColorMode(mode, systemDark);
+        }
+        expect(visited).toEqual(new Set(["system", "light", "dark"]));
+        expect(mode).toBe(start);
+      }
+    }
   });
 
   it("always changes the applied scheme on the first tap from system", () => {

@@ -1,5 +1,6 @@
 export type ColorMode = "system" | "light" | "dark";
 
+// Keep the legacy key so the product rename preserves saved preferences.
 export const COLOR_MODE_STORAGE_KEY = "yueyu-color-mode";
 export const COLOR_MODE_SCRIPT_ID = "color-mode-boot";
 
@@ -38,11 +39,11 @@ export function schemeForMode(mode: ColorMode): "light" | "dark" {
 }
 
 /**
- * Next mode for the compact single-button cycle used on mobile. From "system"
- * it jumps to the opposite of whatever the OS currently shows, so the first tap
- * always produces a visible change; then dark -> system, light -> dark.
+ * Cycle system -> opposite OS scheme -> explicit OS scheme -> system.
+ * The first tap visibly changes the theme without skipping either explicit mode.
  */
 export function nextColorMode(mode: ColorMode, systemDark: boolean): ColorMode {
   if (mode === "system") return systemDark ? "light" : "dark";
-  return mode === "light" ? "dark" : "system";
+  const systemScheme = systemDark ? "dark" : "light";
+  return mode === systemScheme ? "system" : systemScheme;
 }
