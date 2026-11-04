@@ -3,7 +3,7 @@ import { handleApiError, parseJsonBody } from "@/lib/api";
 import { monthKey } from "@/lib/domain";
 import { conflict, notFound } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
-import { transactionReimburseSchema, transactionRestoreSchema, transactionSchema } from "@/lib/validation";
+import { transactionReimburseSchema, transactionRestoreSchema, transactionSchema, transactionUnreimburseSchema } from "@/lib/validation";
 import { serializeTransaction, transactionInclude } from "@/lib/serializers";
 import { assertTransactionCategory, transactionData } from "@/lib/transactions";
 import { isMonthLocked } from "@/lib/summary";
@@ -20,17 +20,18 @@ export async function PATCH(request: Request, { params }: Context) {
     if (!existing) throw notFound("账目不存在");
     if (await isMonthLocked(monthKey(existing.occurredOn))) throw conflict("本月已经结算，请先重新打开本月");
 
-    // Reimburse is its own strict body ({ reimburse: true }) so it cannot
-    // smuggle other fields past transactionSchema. Reimbursement is an
-    // accounting fact, not a ledger edit: the row keeps its amount, category
-    // and date, and only the timestamp flips.
-    if (transactionReimburseSchema.safeParse(body).success) {
-      if (existing.type !== "EXPENSE") throw conflict("只有支出才能标记报销");
-      if (existing.deletedAt) throw conflict("这条账目已被删除，无法报销");
-      if (existing.reimbursedAt) return NextResponse.json({ transaction: serializeTransaction(await prisma.transaction.findUniqueOrThrow({ where: { id }, include: transactionInclude })) });
+    // Action keys must never fall through to a full edit: transactionSchema
+    // strips unknown keys, which would otherwise let a mixed body edit money.
+    if (body !== null && typeof body === "object" && ("reimburse" in body || "unreimburse" in body)) {
+      const undo = "unreimburse" in body;
+      (undo ? transactionUnreimburseSchema : transactionReimburseSchema).parse(body);
+      if (existing.type !== "EXPENSE") throw conflict(undo ? "只有支出才能撤销报销" : "只有支出才能标记报销");
+      if (existing.deletedAt) throw conflict(undo ? "这条账目已被删除，无法撤销报销" : "这条账目已被删除，无法报销");
+      const alreadyApplied = undo ? existing.reimbursedAt === null : existing.reimbursedAt !== null;
+      if (alreadyApplied) return NextResponse.json({ transaction: serializeTransaction(await prisma.transaction.findUniqueOrThrow({ where: { id }, include: transactionInclude })) });
       const reimbursed = await prisma.transaction.update({
         where: { id },
-        data: { reimbursedAt: new Date() },
+        data: { reimbursedAt: undo ? null : new Date() },
         include: transactionInclude,
       });
       return NextResponse.json({ transaction: serializeTransaction(reimbursed) });

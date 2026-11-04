@@ -109,6 +109,7 @@ export async function GET(request: Request) {
       budget: budgetCents === null ? null : { amountCents: budgetCents },
       budgetSource: budget.source,
       expenseCents,
+      outOfPocketCents: expenseCents,
       reimbursedCents,
       reimbursedCount: reimbursed._count._all,
       incomeCents: income._sum.amountCents ?? 0,

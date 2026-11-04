@@ -9,6 +9,7 @@ import {
   transactionReimburseSchema,
   transactionRestoreSchema,
   transactionSchema,
+  transactionUnreimburseSchema,
 } from "@/lib/validation";
 
 /** Shaped exactly like GET /api/export?format=json, extra columns included. */
@@ -81,6 +82,19 @@ describe("backupSchema", () => {
   it("caps payload size so one request cannot balloon the restore", () => {
     const rows = Array.from({ length: 501 }, (_, index) => ({ id: `c${index}`, name: `分类${index}` }));
     expect(() => backupSchema.parse({ categories: rows })).toThrow();
+  });
+
+  it("allows a bounded row batch from a backup containing more than 20,000 transactions", () => {
+    const transactions = Array.from({ length: 20_001 }, (_, index) => ({
+      id: `tx-${index}`,
+      type: "EXPENSE",
+      amountCents: 100,
+      occurredOn: "2024-03-10",
+      categoryId: "cat-1",
+    }));
+    const parsed = importSchema.parse({ format: "json", rows: transactions.slice(0, 1), backup: { transactions } });
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.backup?.transactions).toHaveLength(20_001);
   });
 });
 
@@ -184,6 +198,14 @@ describe("strict toggle and restore bodies", () => {
     expect(transactionReimburseSchema.safeParse({ reimburse: true }).success).toBe(true);
     expect(transactionReimburseSchema.safeParse({ reimburse: false }).success).toBe(false);
     expect(transactionReimburseSchema.safeParse({ reimburse: true, amount: "1" }).success).toBe(false);
+  });
+
+  it("accepts only unreimburse: true and rejects mixed actions or edits", () => {
+    expect(transactionUnreimburseSchema.safeParse({ unreimburse: true }).success).toBe(true);
+    expect(transactionUnreimburseSchema.safeParse({ unreimburse: false }).success).toBe(false);
+    expect(transactionUnreimburseSchema.safeParse({ unreimburse: true, amount: "1" }).success).toBe(false);
+    expect(transactionUnreimburseSchema.safeParse({ unreimburse: true, reimburse: true }).success).toBe(false);
+    expect(transactionUnreimburseSchema.safeParse(validTransaction).success).toBe(false);
   });
 
   it("does not mistake a full transaction body for a restore body", () => {

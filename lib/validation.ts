@@ -160,7 +160,9 @@ export const backupSchema = z.object({
   subscriptions: z.array(backupSubscriptionSchema).max(500).optional(),
   budgets: z.array(backupBudgetSchema).max(1200).optional(),
   settlements: z.array(backupSettlementSchema).max(1200).optional(),
-  transactions: z.array(backupTransactionSchema).max(20_000).optional(),
+  // Only rows below are executed; a batched restore may carry a larger archive.
+  // The request body still has the shared 8 MB limit.
+  transactions: z.array(backupTransactionSchema).optional(),
 });
 
 export type BackupPayload = z.infer<typeof backupSchema>;

@@ -137,4 +137,5 @@ export function validateRowShallow(row: Row): void {
   if (rawAmount === undefined || rawAmount === null || rawAmount === "") parseCents(row.amountCents, "金额");
   else parseAmountToCents(rawAmount);
   parseTransactionType(value(row, "type", "类型"));
+  optionalDateTime(row.reimbursedAt ?? row["报销时间"], "报销时间");
 }

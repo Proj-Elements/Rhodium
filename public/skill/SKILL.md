@@ -25,7 +25,7 @@ curl -fsSL $BASE/api/health       # 正常返回 {"status":"ok","database":"ok"}
 3. **请求小写、响应大写**：账目类型请求传 `"expense"`/`"income"`，响应是 `"EXPENSE"`/`"INCOME"`；分类类型请求 `expense|income|both`，响应 `EXPENSE|INCOME|BOTH`。
 4. **已结算月份只读**：对锁定月份的账目做任何写操作都会 409「本月已经结算，请先重新打开本月」。不要擅自解锁——停下询问用户，得到同意后再 `POST /api/settlements/{month}/reopen`（解除快照保护是用户的决策）。
 
-其余约定：账目是软删除（`DELETE` 后数据仍在，可 PATCH `{"restore":true}` 恢复）；分类没有删除，用 `{"archived":true}` 停用，停用后不再出现在记账选择里但历史账目保留；支出一键报销用 PATCH `{"reimburse":true}`（响应带 `reimbursedAt`）——已报销的支出不再计入 `expenseCents`、预算消耗与剩余，只在 `reimbursedCents`/`reimbursedCount` 单列；报销是会计事实，完整编辑（PATCH 全部字段）会同时撤销报销，删除/恢复不影响报销状态。
+其余约定：账目是软删除（`DELETE` 后数据仍在，可 PATCH `{"restore":true}` 恢复）；分类没有删除，用 `{"archived":true}` 停用，停用后不再出现在记账选择里但历史账目保留；支出一键报销用 PATCH `{"reimburse":true}`（响应带 `reimbursedAt`）——仪表盘的 `expenseCents`/`outOfPocketCents` 不含已报销支出，月度回顾的 `expenseCents` 保留账面全额、`outOfPocketCents` 才是自付额，预算与剩余按自付额计算；`reimbursedCents`/`reimbursedCount` 单列报销。报销是会计事实，可用 `{"unreimburse":true}` 撤销；完整编辑（PATCH 全部字段）也会撤销报销，删除/恢复与 JSON 备份还原保留报销状态。
 
 ## 2. 任务路由：什么问题打哪个接口
 
@@ -52,7 +52,6 @@ curl -fsSL $BASE/api/dashboard            # 当月；?month=2026-09 看指定月
 按问题读字段：
 
 - 花了多少 → `expenseCents` / `incomeCents`（记得除以 100）。
-- 有报销 → `reimbursedCents` / `reimbursedCount` 是已报销金额与笔数，已从 `expenseCents` 与预算口径中排除；报销可随时撤销（见 §3.4）。
 - 有报销 → `reimbursedCents` / `reimbursedCount` 是已报销金额与笔数，已从 `expenseCents` 与预算口径中排除；报销可随时撤销（见 §3.4）。
 - 预算够不够 → `remainingCents`、`usagePercent`；`budget`（`{amountCents}` 或 null）配合 `budgetSource`：`month`=本月显式预算、`preset`=全局预设兜底、`none`=未设预算。
 - 钱花在哪 → `categoryBreakdown`（分类排行，按金额降序，不含报销）。
@@ -99,12 +98,13 @@ curl -fsSL -X PATCH $BASE/api/transactions/<id> -H 'content-type: application/js
 
 # 报销（仅支出；已删除行 409「这条账目已被删除，无法报销」；收入行 409「只有支出才能标记报销」）
 curl -fsSL -X PATCH $BASE/api/transactions/<id> -H 'content-type: application/json' -d '{"reimburse":true}'
-# 撤销报销没有独立接口：用完整编辑（PATCH 全字段）即会同时清空报销状态
+# 撤销报销：仅清空时间戳，不改金额、日期、分类；完整编辑也会撤销报销
+curl -fsSL -X PATCH $BASE/api/transactions/<id> -H 'content-type: application/json' -d '{"unreimburse":true}'
 ```
 
 三个边角行为：restore 的 body 必须只有 `{"restore":true}`，混入其他字段 400；已软删除的行不能直接编辑（409），先 restore；restore 会重新校验分类，分类已归档或类型不匹配时 400「请选择有效的分类」。
 
-报销的 body 同样只有 `{"reimburse":true}`（混入其他字段 400）；重复报销幂等返回 200；撤销报销没有独立接口，用完整编辑即会同时清空报销状态。
+报销与撤销报销的 body 分别只能有 `{"reimburse":true}` 或 `{"unreimburse":true}`（混入其他操作或完整编辑字段也会 400）；重复操作幂等返回 200。两种操作都只允许未删除、未锁定月份内的支出，收入或已删除行返回 409；不存在的 id 返回 404。
 
 ### 3.5 预算
 
@@ -137,7 +137,7 @@ curl -fsSL $BASE/api/settlements/2026-09          # {"summary": {...}}
 curl -fsSL "$BASE/api/settlements?end=2026-09&include=focus"
 ```
 
-summary 字段：`budgetCents`/`budgetSource`/`expenseCents`/`incomeCents`/`remainingCents`、`subscriptionExpenseCents`（订阅产生的支出）、`topCategory`/`topDate`（单日最高）、`dailyBreakdown`（每天 `{date,expenseCents,incomeCents,transactionCount}`）、`dailyAverageCents`、`transactionCount`（全部账目数）、`expenseTransactionCount`（仅支出笔数）、`settlement`（已结算快照或 null）。
+summary 字段：`budgetCents`/`budgetSource`/`expenseCents`（账面支出，含报销）/`outOfPocketCents`（自付额）/`reimbursedCents`/`reimbursedCount`/`incomeCents`/`remainingCents`（预算减自付额）、`subscriptionExpenseCents`（订阅产生的支出）、`topCategory`/`topDate`（单日最高，按账面全额）、`dailyBreakdown`（每天 `{date,expenseCents,incomeCents,transactionCount}`）、`dailyAverageCents`（自付额日均）、`transactionCount`（全部账目数）、`expenseTransactionCount`（仅支出笔数）、`settlement`（已结算快照或 null）。
 
 结算与重开是冻结/解除冻结数据的操作，**执行前用一句话向用户复述要做的事**：
 
@@ -220,7 +220,7 @@ curl -fsSL -X PATCH $BASE/api/categories/<id> -H 'content-type: application/json
 | GET /api/dashboard?month= | 当月/指定月总览 |
 | GET /api/transactions?month=&type= | 账目清单（type 可省略） |
 | POST /api/transactions | 记账 `{type,amount,occurredOn,categoryId,note?}` → 201 |
-| PATCH /api/transactions/{id} | 修改（同 POST 全部字段）、`{"restore":true}` 恢复或 `{"reimburse":true}` 报销 |
+| PATCH /api/transactions/{id} | 修改（同 POST 全部字段）、`{"restore":true}` 恢复、`{"reimburse":true}` 报销或 `{"unreimburse":true}` 撤销报销 |
 | DELETE /api/transactions/{id} | 软删除 |
 | GET /api/budgets/{month} | `{budget,preset,effectiveBudgetCents}` |
 | PUT /api/budgets/{month}?scope=month\|future | 设置显式预算（future 含 240 个月） |
