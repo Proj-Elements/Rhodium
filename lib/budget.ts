@@ -56,3 +56,12 @@ export async function resolveBudgets(months: string[]): Promise<Map<string, Reso
     }),
   );
 }
+
+/** Save a monthly budget row, creating or updating as needed. */
+export async function saveMonthlyBudget(month: string, amountCents: number): Promise<void> {
+  await prisma.monthlyBudget.upsert({
+    where: { month: monthStart(month) },
+    create: { month: monthStart(month), amountCents },
+    update: { amountCents },
+  });
+}

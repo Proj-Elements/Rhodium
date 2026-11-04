@@ -62,6 +62,15 @@
   --mono: "JetBrains Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 
+/* The legacy snapshot has no bundled webfont; use installed fonts only. */
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local("JetBrains Mono"), local("JetBrainsMono-Regular");
+}
+
 /* Dark scheme: the boot script in layout.tsx sets data-color-scheme on <html>
    before first paint; use-color-mode keeps it in sync afterwards. */
 :root[data-color-scheme="dark"] {

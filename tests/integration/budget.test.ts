@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { GET as getBudget, PUT as putBudget } from "@/app/api/budgets/[month]/route";
 import { GET as getDashboard } from "@/app/api/dashboard/route";
 import { POST as settleMonth } from "@/app/api/settlements/[month]/settle/route";
-import { resolveBudget, setBudgetPreset } from "@/lib/budget";
+import { resolveBudget, saveMonthlyBudget, setBudgetPreset } from "@/lib/budget";
 import { monthStart } from "@/lib/domain";
 import { getMonthSummary } from "@/lib/summary";
 import { addTransaction, createCategory, prisma, resetDatabase, routeContext } from "./helpers";
@@ -35,6 +35,25 @@ describe("resolveBudget", () => {
     await setBudgetPreset(200_000);
     await prisma.monthlyBudget.create({ data: { month: monthStart(MONTH), amountCents: 150_000 } });
     expect(await resolveBudget(MONTH)).toEqual({ amountCents: 150_000, source: "month" });
+  });
+});
+
+describe("saveMonthlyBudget", () => {
+  it("creates and updates one explicit month without changing the preset", async () => {
+    await setBudgetPreset(200_000);
+    await saveMonthlyBudget(MONTH, 150_000);
+    expect(await resolveBudget(MONTH)).toEqual({ amountCents: 150_000, source: "month" });
+
+    await saveMonthlyBudget(MONTH, 125_000);
+    expect(await resolveBudget(MONTH)).toEqual({ amountCents: 125_000, source: "month" });
+    expect(await prisma.monthlyBudget.count()).toBe(1);
+    expect((await prisma.budgetPreset.findUniqueOrThrow({ where: { id: 1 } })).amountCents).toBe(200_000);
+  });
+
+  it("keeps a zero budget explicit instead of falling back to the preset", async () => {
+    await setBudgetPreset(200_000);
+    await saveMonthlyBudget(MONTH, 0);
+    expect(await resolveBudget(MONTH)).toEqual({ amountCents: 0, source: "month" });
   });
 });
 
