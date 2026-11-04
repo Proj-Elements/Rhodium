@@ -1,6 +1,8 @@
-# 月余
+# Rhodium
 
 面向大学生的个人记账 Web 应用：记录日常支出、设置月度预算、管理固定订阅，并在月底回顾本月余量。
+
+产品显示名称为 Rhodium。数据库、Docker 数据卷和浏览器偏好的旧标识保持不变，改名不会创建新账本或清空已有设置。
 
 ## 本地开发
 
@@ -60,8 +62,8 @@ POSTGRES_PASSWORD='强口令' APP_BIND=0.0.0.0 docker compose up -d --build
 应用自带一份可一键安装的 Agent 技能包，安装后 ZCode 等支持 skills 的 Agent 能直接通过 API 查看和管理账本（查当月开支、记一笔、预算、结算、订阅、导入导出）。技能文件随应用分发，由应用自身在 `/skill/SKILL.md` 提供：
 
 ```bash
-mkdir -p ~/.agents/skills/yueyu-ledger
-curl -fsSL http://127.0.0.1:3030/skill/SKILL.md -o ~/.agents/skills/yueyu-ledger/SKILL.md
+mkdir -p ~/.agents/skills/rhodium-ledger
+curl -fsSL http://127.0.0.1:3030/skill/SKILL.md -o ~/.agents/skills/rhodium-ledger/SKILL.md
 ```
 
 安装后重启 Agent 会话即可生效。技能源文件在仓库的 `public/skill/SKILL.md`，应用升级时随版本更新，重新执行上面的命令即可刷新。

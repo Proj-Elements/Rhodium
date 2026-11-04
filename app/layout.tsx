@@ -4,7 +4,8 @@ import { COLOR_MODE_SCRIPT_ID, COLOR_MODE_STORAGE_KEY } from "@/lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "月余 · 大学生个人账本",
+  title: "Rhodium · 个人生活账本",
+  applicationName: "Rhodium",
   description: "记录每天的花销，也看见每个月的余量。",
 };
 

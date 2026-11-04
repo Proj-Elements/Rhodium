@@ -32,7 +32,7 @@ export async function GET(request: Request) {
         ]),
       );
       return new NextResponse(csv, {
-        headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="yueyu-transactions.csv"' },
+        headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": 'attachment; filename="rhodium-transactions.csv"' },
       });
     }
 
@@ -46,7 +46,7 @@ export async function GET(request: Request) {
         subscriptions: subscriptions.map((item) => ({ ...item, startMonth: dateOnlyKey(item.startMonth).slice(0, 7), endMonth: item.endMonth ? dateOnlyKey(item.endMonth).slice(0, 7) : null })),
         settlements: settlements.map((item) => ({ ...item, month: dateOnlyKey(item.month) })),
       },
-      { headers: { "Content-Disposition": 'attachment; filename="yueyu-backup.json"' } },
+      { headers: { "Content-Disposition": 'attachment; filename="rhodium-backup.json"' } },
     );
   } catch (error) {
     return handleApiError(error);
