@@ -104,6 +104,40 @@ four database modules pass. Typecheck and focused ESLint pass. All six migration
 deploy only to the disposable test database. These are local results, not CI or
 production evidence.
 
+The integrated production build passes. Browser checks use a separate
+`rhodium_preview` database with four synthetic transactions, at 1440x1000 and
+360x640 in both themes. Reimbursement/undo update the displayed totals without
+navigation, cancel restores focus, the mobile dialog stays inside the viewport,
+and dashboard/review distinguish gross 115.00, self-paid 85.00 and reimbursed
+30.00. No browser warnings/errors were captured. Evidence screenshot:
+`/tmp/rhodium-mobile-reimbursement-20261105.jpg` (local artifact, not ledger data).
+
+The Node 22.23.4 Alpine container builds using a BuildKit-only license secret.
+It starts as uid 1000, applies/checks all six migrations on the disposable preview
+database, returns healthy API/page responses, reads the same synthetic fixture,
+and shuts down with exit 0. The complete final image archive, metadata and history
+contain no supplied key; the runtime has no license environment/secret file or
+`.env`. This is local arm64 container evidence, not multi-platform or deployment
+proof. The existing `journal-app-1` on 3030 remains unchanged.
+
+## Scoped CI
+
+The existing `CI / verify` entry point is retained. Node and Actions are pinned;
+permissions are read-only, with timeouts/concurrency. Ordinary pushes compare
+their previous SHA, PRs their target merge base, and merge queues their candidate
+base. A new repository uses the audited pre-integration main `7552cd5` as its
+explicit bootstrap, failing if unavailable. Renames/deletions keep source paths
+for Vitest dependency-graph selection; present changed source is linted. Shared
+tooling/schema changes add explicit accounting contract modules, not the global
+suite. Seven Node selector tests and 103 tests in five tooling-contract modules
+pass locally. Global suites are restricted to new version-tag events; this task
+creates no version tag.
+
+Only trusted repository push builds receive `HEROUI_KEY`. PR/queue code does not
+receive the key; licensed type/build checks explicitly fail until a trusted
+artifact channel exists rather than silently skipping required verification.
+No PR or queue requirement is currently configured for this empty private repo.
+
 ## Remote Delivery State
 
 The authorized GitHub destination is `git@github.com:Proj-Elements/Rhodium.git`;
@@ -126,3 +160,12 @@ repository Actions Secret. No key is stored in tracked files or Docker arguments
   empty. Code synchronization cannot create the missing capture retroactively;
   the user must review hook trust for future sessions. Do not fabricate trailers,
   amend commits, enable hooks or upload this secret-bearing session manually.
+
+## Dependency Risk Boundary
+
+The refreshed lockfile audit reports 12 advisories: 4 high and 8 moderate, no
+critical. Existing tracked security TODOs cover Zod 3 (a major-version migration
+is needed), HeroUI install-tool figlet, ESLint/minimatch and Vitest/mocker. This
+branch-integration task does not bundle those independent dependency migrations.
+The app stays loopback-only; local checks and source synchronization do not
+authorize a release or public deployment, nor establish these issues as fixed.

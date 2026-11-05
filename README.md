@@ -8,6 +8,8 @@
 
 ## 本地开发
 
+构建和测试使用受支持的 Node.js 22（至少 22.12；CI / Docker 固定为 22.23.4）。锁定的 Vitest 5 不支持旧的 Node.js 20。
+
 ```bash
 npm install
 cp .env.example .env
