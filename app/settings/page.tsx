@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Input, ListBox, Select, Skeleton } from "@heroui/react";
+import { Button, Card, Input, ListBox, Select, Skeleton } from "@heroui/react";
 import { DropZone, Segment } from "@heroui-pro/react";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { IconButton } from "@/components/icon-button";
@@ -15,6 +15,7 @@ import { isCurrentMonthReady, runClientLoad } from "@/lib/client-load";
 import { useToday } from "@/lib/use-today";
 import { createImportPreviewController, type ImportPreviewState } from "@/lib/import-preview-controller";
 import { SettingsDataBoundary } from "@/components/settings-data-boundary";
+import { ImportPreviewStatus } from "@/components/import-preview-status";
 import { categoryIconLabels, categoryIconNames, isCategoryIconName, type CategoryIconName } from "@/lib/category-icons";
 import { CategoryDTO } from "@/lib/types";
 
@@ -30,7 +31,6 @@ export default function SettingsPage() {
   const [entryDateMode, setEntryDateMode] = useState("today");
   const [importState, setImportState] = useState<ImportPreviewState>({ status: "idle" });
   const [importController] = useState(() => createImportPreviewController(setImportState));
-  const preview = importState.status === "ready" ? importState.selection.preview : null;
   const [importing, setImporting] = useState(false);
   const importingRef = useRef(false);
   const [loading, setLoading] = useState(true);
@@ -306,8 +306,8 @@ export default function SettingsPage() {
           <Card className="panel reveal reveal-delay-1">
             <div className="section-heading"><div><h2 className="section-title">记录在这里，数据属于你</h2><p className="section-description">定期留一份备份，安心记录每一天。</p></div></div>
             <div className="flex flex-col gap-2.5"><a href="/api/export?format=json" className="flex items-center justify-between gap-3 rounded-xl bg-surface-secondary px-4 py-3.5 text-xs focus-visible:outline-2 focus-visible:outline-focus"><span><b className="font-medium">JSON 完整备份</b><small className="mt-1 block text-[10px] text-muted">预算、分类、订阅与全部账目</small></span><Icon name="download" size={16} /></a><a href="/api/export?format=csv" className="flex items-center justify-between gap-3 rounded-xl bg-surface-secondary px-4 py-3.5 text-xs focus-visible:outline-2 focus-visible:outline-focus"><span><b className="font-medium">CSV 账目导出</b><small className="mt-1 block text-[10px] text-muted">适合在表格软件中整理分析</small></span><Icon name="download" size={16} /></a></div>
-            <div className="mt-6"><h3 className="mb-3 text-xs font-medium">导入已有记录</h3><DropZone className="w-full"><DropZone.Input id="import-file" accept=".json,.csv,application/json,text/csv" onSelect={(files) => { if (files?.[0]) void processSelectedFile(files[0]); }} /><DropZone.Area className="rounded-2xl p-5" onDrop={(event) => { const file = event.items.find((item) => item.kind === "file"); if (file && file.kind === "file") processSelectedFile(file.getFile()); }}><DropZone.Icon className="text-accent"><Icon name="upload" size={22} /></DropZone.Icon><DropZone.Label className="text-xs font-medium">把文件拖到这里</DropZone.Label><DropZone.Description className="text-[10px]">支持 JSON 备份或 CSV 账目</DropZone.Description><DropZone.Trigger className="mt-3">选择文件</DropZone.Trigger></DropZone.Area></DropZone></div>
-            {preview && <Alert className="mt-4" status={preview.errors.length ? "danger" : "success"}><Alert.Indicator /><Alert.Content><Alert.Title>{preview.errors.length ? "文件需要修正" : "文件检查通过"}</Alert.Title><Alert.Description>{preview.valid} / {preview.total} 条记录可导入</Alert.Description>{preview.errors.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-xs">{preview.errors.slice(0, 5).map((item) => <li key={item}>{item}</li>)}</ul>}<div className="mt-3 flex flex-wrap gap-2">{!preview.errors.length && <Button size="sm" onPress={() => void confirmImport()} isPending={importing}>确认导入</Button>}<Button size="sm" variant="ghost" isDisabled={importing} onPress={cancelImport}>取消</Button></div></Alert.Content></Alert>}
+            <div className="mt-6"><h3 className="mb-3 text-xs font-medium">导入已有记录</h3><DropZone className="w-full"><DropZone.Input disabled={!ready || importing} id="import-file" accept=".json,.csv,application/json,text/csv" onSelect={(files) => { if (files?.[0]) void processSelectedFile(files[0]); }} /><DropZone.Area isDisabled={!ready || importing} className="rounded-2xl p-5" onDrop={(event) => { const file = event.items.find((item) => item.kind === "file"); if (file && file.kind === "file") processSelectedFile(file.getFile()); }}><DropZone.Icon className="text-accent"><Icon name="upload" size={22} /></DropZone.Icon><DropZone.Label className="text-xs font-medium">把文件拖到这里</DropZone.Label><DropZone.Description className="text-[10px]">支持 JSON 备份或 CSV 账目</DropZone.Description><DropZone.Trigger isDisabled={!ready || importing} className="mt-3">选择文件</DropZone.Trigger></DropZone.Area></DropZone></div>
+            <ImportPreviewStatus state={importState} busy={importing} disabled={!ready} onConfirm={() => void confirmImport()} onCancel={cancelImport} />
             <p className="mt-4 text-[10px] leading-5 text-muted">CSV 作为新账目追加；恢复完整账本请使用 JSON 备份。导入前会先检查文件。</p>
           </Card>
           <p className="flex items-start gap-2 px-2 text-[10px] leading-5 text-muted"><span className="mt-1 shrink-0"><Icon name="shield" size={13} /></span>这是一个单人账本，不含登录鉴权。请仅在本机或可信网络中使用。</p>
