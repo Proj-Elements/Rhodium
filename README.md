@@ -11,7 +11,10 @@
 构建和测试使用受支持的 Node.js 22（至少 22.12；CI / Docker 固定为 22.23.4）。锁定的 Vitest 5 不支持旧的 Node.js 20。
 
 ```bash
-npm install
+npm ci --ignore-scripts
+# 在当前 shell 设置 HEROUI_KEY 后初始化锁定的组件版本
+node node_modules/hpsetup/bin.js react --auto
+npx prisma generate
 cp .env.example .env
 # 编辑 .env，把 POSTGRES_PASSWORD 与 DATABASE_URL 里的密码改成同一个值
 docker compose up -d db
@@ -27,7 +30,7 @@ npm run dev
 docker compose up -d --build
 ```
 
-当前界面使用 HeroUI Pro 组件。Docker 构建前需在当前 shell 设置 `HEROUI_KEY`（从 HeroUI Pro 获取），不要把它写进仓库或 `.env`。Compose 会通过 BuildKit secret 将其仅传给固定版本的 `hpsetup@4.7.4`；密钥不作为构建参数或镜像环境变量保存。不要提交或发送 key。本地首次 `npm ci` 后也需运行 `npx -y hpsetup@4.7.4 react --auto`，密钥同样通过环境变量提供。
+当前界面使用 HeroUI Pro 组件。Docker 构建前需在当前 shell 设置 `HEROUI_KEY`（从 HeroUI Pro 获取），不要把它写进仓库或 `.env`。Compose 会通过 BuildKit secret 将其仅传给锁文件中的 `hpsetup@4.7.4`；工具及其传递依赖均由 `npm ci` 安装，不再用构建时的 `npx` 临时下载。密钥不作为构建参数或镜像环境变量保存。不要提交或发送 key。本地首次安装后也需运行上述初始化命令，密钥同样通过环境变量提供。
 
 应用容器会在启动时自动执行 Prisma migrations。PostgreSQL 数据保存在 `yueyu-postgres` named volume 中。健康检查探针为 `GET /api/health`。
 

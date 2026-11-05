@@ -48,3 +48,10 @@ test("shared ledger locks and destructive-test guards require their database dep
     assert.ok(scope.dbSources.includes(path));
   }
 });
+test("Docker changes require a licensed build and disposable database smoke test", () => {
+  const scope = scopeFor(["Dockerfile"]);
+  assert.equal(scope.container, true);
+  assert.equal(scope.build, true);
+  assert.equal(scope.database, true);
+  assert.equal(scopeFor(["README.md"]).container, false);
+});

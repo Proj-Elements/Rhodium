@@ -19,7 +19,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # The hpsetup key is only available during this layer and is never baked into the image.
 RUN --mount=type=secret,id=heroui_key,required=true \
-    HEROUI_KEY="$(cat /run/secrets/heroui_key)" CI=1 npx -y hpsetup@4.7.4 react --auto --no-cache && \
+    HEROUI_KEY="$(cat /run/secrets/heroui_key)" CI=1 node node_modules/hpsetup/bin.js react --auto --no-cache && \
+    npm ls hpsetup @heroui-pro/react --depth=0 && \
     npm run build
 
 FROM base AS runner

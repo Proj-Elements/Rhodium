@@ -82,9 +82,9 @@ TEST_DATABASE_URL="$DISPOSABLE_TEST_DATABASE_URL" npm run test:db
 
 2026-11-03 审计：本次兼容性修补包括 Next.js / eslint-config-next `15.5.28`、Vite `7.3.7`，以及锁文件内 brace-expansion `1.1.21` / `2.1.7`、source-map-js `1.2.2`。`npm audit` 从 25 项（1 critical、8 high）降为 20 项（0 critical、4 high、16 moderate）；不代表依赖已全部安全，也不代表允许公网部署。
 
-- TODO(security): 为 Zod 迁移到不受 [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) 影响的兼容版本建立独立变更。当前直接依赖为 3.x，修补版本要求 4.6.6+，不能在界面重设计中未经验证地强制跨主版本。移除条件：所有 schema、错误反馈和完整导入集成测试通过，重新审计无此告警。现有请求体上限和本机使用边界不是完全修复。
-- TODO(security): 跟进 HeroUI Pro 安装工具固定依赖的 figlet `1.11.0`（[GHSA-62ch-8vmq-8xm7](https://github.com/advisories/GHSA-62ch-8vmq-8xm7)）。`npm update` 不能跨越其精确依赖；未用不经验证的 override。移除条件：上游采用 1.11.3+ 或经单独验证的替代方案，安装/构建和审计通过。该链路造成 3 个 high 包告警，不能当作 3 个独立运行时漏洞。
-- TODO(security): 独立处理 ESLint/minimatch 与 Vitest/mocker 的剩余 moderate 告警。避免 `npm audit fix --force` 给出的大版本升级/降级方案。移除条件：兼容更新后 lint、单元测试、数据库测试和生产构建全部通过，审计结果得到确认。当前仅使用 `vitest run`，未暴露测试 UI 服务。
+- 2026-11-05 收尾已迁移到 Zod `4.6.7`，兼容调整 record、集合上限和错误映射；保留输入限流，不再仅靠它缓解 [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5)。
+- 安装工具已加入锁文件；figlet 覆盖为 `1.11.3`，tar 为 `7.5.21`，避免安装器自身带入已知漏洞。
+- Vitest 升至 `5.0.3`，受影响 minimatch 覆盖为 `11.0.4`，未升级 Next.js/Prisma 或强制替换整棵依赖树。最新验证与审计口径见 [质量修复记录](quality-hardening.md)。
 - TODO(design): Figma MCP 配额恢复后读取给定节点并核对组件规格；若需要像素级一致性，另行确认还原范围。移除条件：取得实际节点上下文并完成视觉对照；本次不宣称该项已完成。
 
 分类图标的数据契约、迁移和备份支持已在 `eca5ac8` 本地提交。未配置 Git remote，当前也未提供 Docker 构建所需 `HEROUI_KEY`；尚未执行 push、远程 CI 或正式部署。3031 是独立测试库预览，不能视为 3030 真实账本的部署。

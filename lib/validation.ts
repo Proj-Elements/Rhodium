@@ -97,11 +97,11 @@ export const categoryPatchSchema = z
 
 const backupIdValue = z.string().trim().min(1).max(60);
 
-/** Zod 3 array.max still validates every element; bound work before that step. */
-function boundedArray<T extends z.ZodTypeAny>(element: T, maximum: number) {
+/** Bound work before per-element parsing, not only after array validation. */
+function boundedArray<T extends z.ZodType>(element: T, maximum: number) {
   return z.preprocess((value, context) => {
     if (Array.isArray(value) && value.length > maximum) {
-      context.addIssue({ code: z.ZodIssueCode.too_big, type: "array", maximum, inclusive: true, fatal: true });
+      context.addIssue({ code: "too_big", origin: "array", maximum, inclusive: true });
       return z.NEVER;
     }
     return value;
@@ -191,6 +191,6 @@ export const importSchema = z.object({
   // Empty row lists are legal: a full backup may only carry categories,
   // subscriptions, budgets or settlements. The real ceiling on a payload is
   // the 8 MB body limit; this cap just bounds the row-loop work inside.
-  rows: boundedArray(z.record(z.unknown()), 20_000),
+  rows: boundedArray(z.record(z.string(), z.unknown()), 20_000),
   backup: backupSchema.optional(),
 });

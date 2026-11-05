@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
-import { ZodError } from "zod";
+import { flattenError, ZodError } from "zod";
 import { AppError } from "@/lib/errors";
 import { monthEnd, monthStart, parseMonth } from "@/lib/domain";
 
@@ -13,7 +13,7 @@ export function handleApiError(error: unknown) {
     return jsonError(error.message, error.status);
   }
   if (error instanceof ZodError) {
-    return jsonError("请求参数不完整或格式不正确", 400, error.flatten());
+    return jsonError("请求参数不完整或格式不正确", 400, flattenError(error));
   }
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     if (error.code === "P2025") return jsonError("请求的数据不存在", 404);

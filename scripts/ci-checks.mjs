@@ -27,13 +27,15 @@ export function scopeFor(paths, present = () => true) {
   const tooling = paths.some((path) => /^(?:package(?:-lock)?\.json|tsconfig\.json|(?:next|postcss|eslint|vitest).*config\.|\.github\/workflows\/|scripts\/ci-checks)/.test(path));
   const seeds = tooling ? ["lib/domain.test.ts", "lib/validation.test.ts", "lib/summary.test.ts", "lib/import-parser.test.ts", "lib/theme.test.ts"] : [];
   const schema = paths.some((path) => path.startsWith("prisma/"));
+  const container = paths.some((path) => path === "Dockerfile" || path === ".dockerignore");
   const dbSeeds = schema || tooling ? ["tests/integration/budget.test.ts", "tests/integration/reimburse.test.ts", "tests/integration/category-icons.test.ts"] : [];
   return {
     sources: [...new Set([...sources, ...seeds])],
     dbSources: [...new Set([...sources, ...dbSeeds])],
-    database: schema || tooling || paths.some((path) => /^(?:app\/api\/|tests\/integration\/|lib\/(?:api|budget|domain|errors|import-parser|ledger-write|prisma|rate-limit|seed|serializers|subscription-planner|subscription-serializer|subscriptions|summary|test-database|transactions|validation)\.)/.test(path)),
+    database: container || schema || tooling || paths.some((path) => /^(?:app\/api\/|tests\/integration\/|lib\/(?:api|budget|domain|errors|import-parser|ledger-write|prisma|rate-limit|seed|serializers|subscription-planner|subscription-serializer|subscriptions|summary|test-database|transactions|validation)\.)/.test(path)),
     typecheck: tooling || schema || sources.some((path) => /\.tsx?$/.test(path)),
-    build: tooling || schema || paths.some((path) => /^(?:app|components)\//.test(path)),
+    build: container || tooling || schema || paths.some((path) => /^(?:app|components)\//.test(path)),
+    container,
     lint: paths.filter((path) => /\.(?:[cm]?js|tsx?)$/.test(path) && present(path)),
     selectorTests: paths.some((path) => path.startsWith("scripts/ci-checks")),
   };
@@ -57,7 +59,7 @@ function plan() {
   const scope = { base, head, paths, ...scopeFor(paths, existsSync) };
   writeFileSync(scopeFile, JSON.stringify(scope, null, 2));
   console.log(JSON.stringify(scope, null, 2));
-  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `build=${scope.build}\nlicensed=${scope.build || scope.typecheck}\n`);
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `build=${scope.build}\nlicensed=${scope.build || scope.typecheck}\ncontainer=${scope.container}\n`);
 }
 
 function verify() {
