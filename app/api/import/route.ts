@@ -35,10 +35,9 @@ function chunk<T>(items: T[], size: number): T[][] {
 }
 
 /**
- * Backup ids are *correlation* keys only: they line up rows inside one payload
- * (a transaction pointing at a category, a subscription pointing at a category)
- * and are never written as database primary keys. A restore therefore merges into
- * the existing ledger instead of overwriting rows the caller names by id.
+ * Category ids correlate the backup with local natural keys. Subscriptions keep
+ * their validated backup identities: names are not unique, so name-based merging
+ * would collapse separate recurring expenses and lose occurrence rows.
  */
 type IdMap = { categories: Map<string, string>; subscriptions: Map<string, string> };
 
@@ -76,10 +75,9 @@ async function reconcileOccurrenceKeys(tx: Tx, wanted: Map<string, string | null
 /**
  * Restore the non-transaction parts of a backup.
  *
- * Every entity is matched on its natural key — categories on (name, type),
- * subscriptions on name, budgets and settlements on month — so an import merges
- * into the existing ledger. Backup ids only populate `idMap` so transaction rows
- * referencing them can be re-pointed at the local row.
+ * Categories merge on (name, type), subscriptions on their stable ids, and
+ * budgets/settlements on month. Only a validated full backup can update existing
+ * identities; bare CSV/JSON row lists remain insert-only.
  */
 async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
   const existingCategories = await tx.category.findMany();
@@ -91,9 +89,13 @@ async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
     const type = parseCategoryType(row.type);
     const existing = categoryByNameType.get(`${name}|${type}`);
     if (existing) {
-      // Old backups omit icon; restoring one must not erase a newer choice.
-      if (row.icon !== undefined && row.icon !== existing.icon) {
-        const updated = await tx.category.update({ where: { id: existing.id }, data: { icon: row.icon } });
+      // Missing legacy fields preserve local metadata; explicit values restore it.
+      const metadata = {
+        ...(row.icon !== undefined ? { icon: row.icon } : {}),
+        ...(row.archivedAt !== undefined ? { archivedAt: optionalDateTime(row.archivedAt, "分类归档时间") } : {}),
+      };
+      if (Object.keys(metadata).length) {
+        const updated = await tx.category.update({ where: { id: existing.id }, data: metadata });
         categoryByNameType.set(`${name}|${type}`, updated);
         categoryById.set(existing.id, updated);
       }
@@ -119,10 +121,6 @@ async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
 
   const backupSubscriptions = backup.subscriptions ?? [];
   if (backupSubscriptions.length) {
-    const names = [...new Set(backupSubscriptions.map((row) => row.name.trim()))];
-    const existingSubscriptions = await tx.subscription.findMany({ where: { name: { in: names } }, select: { id: true, name: true } });
-    const subscriptionByName = new Map(existingSubscriptions.map((item) => [item.name, item.id]));
-
     for (const row of backupSubscriptions) {
       const name = row.name.trim();
       const categoryId = idMap.categories.get(row.categoryId) ?? row.categoryId;
@@ -145,13 +143,21 @@ async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
         active: parseBoolean(row.active, true),
         note: typeof row.note === "string" ? row.note.trim() || null : null,
       };
-      const existingId = subscriptionByName.get(name);
-      const saved = existingId
-        ? await tx.subscription.update({ where: { id: existingId }, data, select: { id: true } })
-        : await tx.subscription.create({ data, select: { id: true } });
-      subscriptionByName.set(name, saved.id);
+      const saved = await tx.subscription.upsert({
+        where: { id: row.id },
+        create: { id: row.id, ...data },
+        update: data,
+        select: { id: true },
+      });
       idMap.subscriptions.set(row.id, saved.id);
     }
+  }
+
+  if (backup.budgetPreset === null) {
+    await tx.budgetPreset.deleteMany({ where: { id: 1 } });
+  } else if (backup.budgetPreset !== undefined) {
+    const { amountCents } = backup.budgetPreset;
+    await tx.budgetPreset.upsert({ where: { id: 1 }, create: { id: 1, amountCents }, update: { amountCents } });
   }
 
   for (const row of backup.budgets ?? []) {
@@ -195,9 +201,9 @@ async function resolveFallbackCategory(tx: Tx, categories: Category[]): Promise<
   );
 }
 
-/** Returns the category only when it is active and usable for `wanted`. */
-function usableFor(category: Category | undefined, wanted: CategoryType): Category | undefined {
-  if (!category || category.archivedAt !== null) return undefined;
+/** Full-backup history may reference archived categories; new row imports may not. */
+function usableFor(category: Category | undefined, wanted: CategoryType, allowArchived = false): Category | undefined {
+  if (!category || (!allowArchived && category.archivedAt !== null)) return undefined;
   return category.type === wanted || category.type === CategoryType.BOTH ? category : undefined;
 }
 
@@ -267,7 +273,7 @@ export async function POST(request: Request) {
         const wantedType = row.type === TransactionType.EXPENSE ? CategoryType.EXPENSE : CategoryType.INCOME;
         const mappedCategoryId = row.categoryId ? idMap.categories.get(row.categoryId) ?? row.categoryId : null;
         const category =
-          usableFor(mappedCategoryId ? byId.get(mappedCategoryId) : undefined, wantedType) ??
+          usableFor(mappedCategoryId ? byId.get(mappedCategoryId) : undefined, wantedType, restoringBackup) ??
           usableFor(byNameType.get(`${row.categoryName}|${wantedType}`), wantedType) ??
           usableFor(byNameType.get(`${row.categoryName}|${CategoryType.BOTH}`), wantedType) ??
           fallbackCategory;

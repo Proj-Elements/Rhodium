@@ -9,6 +9,7 @@ vi.mock("@/lib/prisma", () => ({
     monthlyBudget: { findMany: vi.fn() },
     subscription: { findMany: vi.fn() },
     monthlySettlement: { findMany: vi.fn() },
+    budgetPreset: { findUnique: vi.fn() },
   },
 }));
 
@@ -19,6 +20,7 @@ beforeEach(() => {
   vi.mocked(prisma.monthlyBudget.findMany).mockResolvedValue([]);
   vi.mocked(prisma.subscription.findMany).mockResolvedValue([]);
   vi.mocked(prisma.monthlySettlement.findMany).mockResolvedValue([]);
+  vi.mocked(prisma.budgetPreset.findUnique).mockResolvedValue(null);
 });
 
 describe("Rhodium export filenames", () => {

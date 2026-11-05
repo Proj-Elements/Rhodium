@@ -60,6 +60,7 @@ POSTGRES_PASSWORD='强口令' APP_BIND=0.0.0.0 docker compose up -d --build
 - 响应头包含 CSP、`X-Frame-Options`、`Referrer-Policy` 等基础加固，API 响应统一 `Cache-Control: no-store`。
 - 请求体上限为 256 KB，导入接口 8 MB；超出返回 413。
 - `/api/export` 会导出全部账目（CSV 已做公式注入转义），请自行保管导出文件。
+- JSON 备份还包含默认预算、月度预算、分类和订阅。恢复时分类按名称/类型合并，订阅与账目按稳定 ID 恢复，不会把同名订阅合成一个；历史账目保留归档分类。旧备份缺少默认预算字段时保留当前设置，显式 `budgetPreset: null` 表示恢复为未设置。导入仍是合并而非清空替换，已结算月份需先重新打开。
 
 ## Agent 技能
 

@@ -87,9 +87,9 @@ const backupIdValue = z.string().trim().min(1).max(60);
  * arbitrary shapes — including primary keys — straight into `upsert`. The rows
  * are now described explicitly and unknown keys are stripped.
  *
- * `id` is kept only as a *correlation* key so transactions referencing a
- * category/subscription can be re-pointed; the import route never writes it as a
- * database primary key.
+ * Category ids are correlation keys. Full backups retain subscription identities
+ * (names are not unique) just as transaction rows retain theirs; only the
+ * explicitly validated mutable columns below may be restored.
  */
 const backupCategorySchema = z.object({
   id: backupIdValue,
@@ -132,7 +132,11 @@ export const backupSchema = z.object({
   version: z.union([z.number(), z.string()]).optional(),
   exportedAt: z.string().optional(),
   categories: z.array(backupCategorySchema).max(500).optional(),
-  subscriptions: z.array(backupSubscriptionSchema).max(500).optional(),
+  subscriptions: z.array(backupSubscriptionSchema).max(500)
+    .refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "备份包含重复订阅 ID")
+    .optional(),
+  // Missing in legacy backups means preserve; explicit null restores no preset.
+  budgetPreset: z.object({ amountCents: z.number().int().min(0).max(2_000_000_000) }).nullable().optional(),
   budgets: z.array(backupBudgetSchema).max(1200).optional(),
   settlements: z.array(backupSettlementSchema).max(1200).optional(),
 });
