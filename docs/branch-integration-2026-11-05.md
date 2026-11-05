@@ -10,6 +10,11 @@ Integration takes place in an isolated Git worktree. The original checkout's
 completed work is committed in coherent items; ignored files and live services
 are preserved.
 
+The user's final clarification excludes every `dsh/` branch. In particular,
+`dsh/quality-hardening` and its linked worktree are not committed, merged,
+switched or deleted by this task. Concurrent work there is expected and is
+outside this integration audit.
+
 The initial `main` tip is `79a5dca9c34b519f001c228366d8eff5842ef9a3`.
 The two other checked-out Freebuff branches are clean at that same commit; no
 uncommitted work was found outside the protected redesign checkout.
@@ -138,7 +143,7 @@ receive the key; licensed type/build checks explicitly fail until a trusted
 artifact channel exists rather than silently skipping required verification.
 No PR or queue requirement is currently configured for this empty private repo.
 
-## Remote Delivery State
+## Verified Delivery and Cleanup
 
 The authorized GitHub destination is `git@github.com:Proj-Elements/Rhodium.git`;
 Entire `origin` is `entire://aws-ap-southeast-1.entire.io/et/elements/rhodium`.
@@ -151,15 +156,42 @@ HeroUI initialization was verified by a fresh, non-cache download using pinned
 `hpsetup@4.7.4`; package/lock content is unchanged. `HEROUI_KEY` exists as a
 repository Actions Secret. No key is stored in tracked files or Docker arguments.
 
-- TODO(delivery): Complete the integrated build, rendered/container checks,
-  scoped Actions checks for the exact pushed SHA, and synchronization of one
-  final main history to both destinations. Remove after remote alignment and
-  safe branch-ref cleanup are verified; do not deploy the production service.
+- The redesign merge is `0bf244fc106221490aedf91cea8782e12dedd181`.
+  The verified source and CI commit is
+  `af2229ff6d3b899f8a3b6cc56910a10d1f40e2a7`; local `main` fast-forwarded
+  to it without creating independent remote merge histories.
+- The exact source SHA passed trusted GitHub push CI on both the
+  [integration branch](https://github.com/Proj-Elements/Rhodium/actions/runs/41973872241)
+  and [main](https://github.com/Proj-Elements/Rhodium/actions/runs/41974702929).
+  The `verify` job actually ran and succeeded; these are observed remote results,
+  separate from the local checks documented above.
+- `git ls-remote` confirmed both GitHub and Entire `main` at that same source
+  SHA. GitHub's default branch is now `main`. Subsequent audit updates are
+  documentation-only; they do not change the source, dependencies or schema
+  covered by those checks.
+- All authorized old local branch refs are deleted, including
+  `codex/ledger-redesign` and `codex/ledger-final-integration`. Each had zero
+  commits outside retained `main` before `git branch -d`. GitHub's temporary
+  integration ref was deleted only after main publication, passing main CI and
+  the default-branch change. Local branches now consist of `main` and the
+  explicitly excluded `dsh/quality-hardening`.
+- Worktree directories, ignored files, Freebuff snapshot tags and non-branch
+  checkpoint refs remain. The original checkout is clean on `main`; this task's
+  retained integration worktree is detached rather than removed. A pre-push
+  credential-pattern scan checked 515 reachable history blobs and found no
+  credential patterns; it is not a complete security audit.
+- The task's 3031 preview and disposable PostgreSQL container are stopped; the
+  latter was removed by its existing `--rm` setting. The production 3030
+  container's original ID and start timestamp were rechecked unchanged after
+  cleanup. No real database migration, service replacement, release or public
+  deployment occurred.
+
 - TODO(traceability): Entire is enabled, but Codex hook trust approval is missing
   and this session has no Entire session state. Outgoing checkpoint inventory is
-  empty. Code synchronization cannot create the missing capture retroactively;
-  the user must review hook trust for future sessions. Do not fabricate trailers,
-  amend commits, enable hooks or upload this secret-bearing session manually.
+  empty at the audited pushes. Code synchronization cannot create the missing
+  capture retroactively; the user must review hook trust for future sessions.
+  Do not fabricate trailers, amend commits, enable hooks or upload this
+  secret-bearing session manually.
 
 ## Dependency Risk Boundary
 
