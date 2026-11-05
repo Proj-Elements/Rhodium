@@ -26,6 +26,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      secrets:
+        - heroui_key
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://yueyu:${POSTGRES_PASSWORD:-yueyu_password}@db:5432/yueyu?schema=public
@@ -50,3 +52,7 @@ services:
 
 volumes:
   yueyu-postgres:
+
+secrets:
+  heroui_key:
+    environment: HEROUI_KEY
