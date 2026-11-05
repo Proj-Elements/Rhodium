@@ -121,7 +121,7 @@ export default function TransactionsPage() {
   );
 
   async function remove(transaction: TransactionDTO) {
-    if (deletingId) return;
+    if (!ready || readOnly || deletingId || transaction.occurredOn.slice(0, 7) !== month) return;
     setDeletingId(transaction.id);
     try {
       await apiFetch(`/api/transactions/${transaction.id}`, { method: "DELETE" });
@@ -263,7 +263,7 @@ export default function TransactionsPage() {
       </div>
       {(showForm || editing) && ready && !readOnly && <TransactionForm categories={categories} transaction={editing} defaultDate={defaultEntryDate} onClose={() => { setShowForm(false); setEditing(null); }} onSaved={() => { setShowForm(false); setEditing(null); reload(); }} />}
       {reimbursing && ready && !readOnly && <ReimburseDialog transaction={reimbursing} onClose={() => setReimbursing(null)} onSaved={() => { setReimbursing(null); reload(); }} />}
-      {pendingDelete && <ConfirmDialog title="删除这笔记录？" description={`「${pendingDelete.note || pendingDelete.category.name}」将从账本中移除。删除后 5 秒内可以撤销，月度统计也会同步更新。`} confirmLabel="删除记录" danger busy={Boolean(deletingId)} onConfirm={() => void remove(pendingDelete)} onClose={() => setPendingDelete(null)} />}
+      {pendingDelete && ready && !readOnly && pendingDelete.occurredOn.slice(0, 7) === month && <ConfirmDialog title="删除这笔记录？" description={`「${pendingDelete.note || pendingDelete.category.name}」将从账本中移除。删除后 5 秒内可以撤销，月度统计也会同步更新。`} confirmLabel="删除记录" danger busy={Boolean(deletingId)} onConfirm={() => void remove(pendingDelete)} onClose={() => setPendingDelete(null)} />}
       {undoId && <Toast message="记录已删除" action="撤销" onAction={() => void undo()} />}
       {!undoId && message && <Toast message={message} />}
     </AppShell>

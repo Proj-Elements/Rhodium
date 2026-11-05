@@ -24,5 +24,10 @@ export async function runClientLoad<T>({ signal, work, success, failure, finishe
 
 /** Mutations require a successful read of exactly the currently displayed month. */
 export function isCurrentMonthReady(month: string, loadedMonth: string | null | undefined, loading: boolean, error: string): boolean {
-  return Boolean(month && loadedMonth === month && !loading && !error);
+  return Boolean(month && loadedMonth === month && isClientDataReady(loading, error));
+}
+
+/** Never present a failed read as an empty, writable collection. */
+export function isClientDataReady(loading: boolean, error: string): boolean {
+  return !loading && !error;
 }

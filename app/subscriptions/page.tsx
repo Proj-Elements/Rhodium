@@ -11,7 +11,7 @@ import { CategoryIcon, Icon } from "@/components/icon";
 import { SubscriptionForm } from "@/components/subscription-form";
 import { Toast, useFlash } from "@/components/toast";
 import { apiFetch, errorMessage } from "@/lib/api-client";
-import { runClientLoad } from "@/lib/client-load";
+import { isClientDataReady, runClientLoad } from "@/lib/client-load";
 import { getCategoryColor, getCategoryColors } from "@/lib/category-colors";
 import { formatMoney, todayInShanghai } from "@/lib/domain";
 import { CategoryDTO, SubscriptionDTO } from "@/lib/types";
@@ -36,6 +36,7 @@ export default function SubscriptionsPage() {
   const [reloadToken, setReloadToken] = useState(0);
   const { message, flash } = useFlash();
   const today = todayInShanghai();
+  const ready = isClientDataReady(loading, error);
 
   const reload = () => setReloadToken((token) => token + 1);
 
@@ -61,7 +62,7 @@ export default function SubscriptionsPage() {
   }, [reloadToken]);
 
   async function toggle(subscription: SubscriptionDTO) {
-    if (busyId) return;
+    if (!ready || busyId) return;
     setBusyId(subscription.id);
     try {
       await apiFetch(`/api/subscriptions/${subscription.id}`, {
@@ -80,7 +81,7 @@ export default function SubscriptionsPage() {
   }
 
   async function remove(subscription: SubscriptionDTO) {
-    if (busyId) return;
+    if (!ready || busyId) return;
     setBusyId(subscription.id);
     try {
       const result = await apiFetch<{ deleted?: boolean; subscription?: SubscriptionDTO }>(`/api/subscriptions/${subscription.id}`, { method: "DELETE" });
@@ -112,7 +113,7 @@ export default function SubscriptionsPage() {
   ]), [categories, subscriptions]);
 
   return (
-    <AppShell actions={<Button onPress={() => setShowForm(true)} isDisabled={loading}><Icon name="plus" size={16} />添加固定支出</Button>}>
+    <AppShell actions={<Button onPress={() => setShowForm(true)} isDisabled={!ready}><Icon name="plus" size={16} />添加固定支出</Button>}>
       <div className="page-stack">
         <section className="grid gap-4 sm:grid-cols-3 reveal" aria-label="固定支出概况">
           <MetricCard label="本月固定支出" value={loading ? "—" : formatMoney(activeTotal)} detail="仅计入本月生效且分类可用的项目" icon="wallet" />
@@ -151,8 +152,8 @@ export default function SubscriptionsPage() {
           </div>
         )}
       </div>
-      {(showForm || editing) && <SubscriptionForm categories={categories} subscription={editing} defaultMonth={currentMonth} onClose={() => { setShowForm(false); setEditing(null); }} onSaved={() => { setShowForm(false); setEditing(null); reload(); }} />}
-      {pendingDelete && <ConfirmDialog title="移除这项固定支出？" description={`「${pendingDelete.name}」之后不再自动记账。存在历史账目的项目会保留并暂停；尚未生成账目的项目将被删除。`} confirmLabel="确认移除" danger busy={Boolean(busyId)} onConfirm={() => void remove(pendingDelete)} onClose={() => setPendingDelete(null)} />}
+      {(showForm || editing) && ready && <SubscriptionForm categories={categories} subscription={editing} defaultMonth={currentMonth} onClose={() => { setShowForm(false); setEditing(null); }} onSaved={() => { setShowForm(false); setEditing(null); reload(); }} />}
+      {pendingDelete && ready && <ConfirmDialog title="移除这项固定支出？" description={`「${pendingDelete.name}」之后不再自动记账。存在历史账目的项目会保留并暂停；尚未生成账目的项目将被删除。`} confirmLabel="确认移除" danger busy={Boolean(busyId)} onConfirm={() => void remove(pendingDelete)} onClose={() => setPendingDelete(null)} />}
       {message && <Toast message={message} />}
     </AppShell>
   );

@@ -82,4 +82,15 @@ describe("import preview selection", () => {
     expect(request).toHaveBeenCalledWith({ format: "json", rows: [], backup }, expect.any(AbortSignal));
     expect(state()).toMatchObject({ status: "ready", selection: { backup, rows: [] } });
   });
+
+  it.each([
+    '{"rows":[{"note":"valid"},null]}',
+    '{"version":1,"transactions":[[]]}',
+    '{"version":1,"transactions":"not an array"}',
+  ])("rejects malformed rows rather than silently omitting them: %s", async (text) => {
+    const { controller, state, request } = setup();
+    await controller.select(file("invalid.json", text));
+    expect(state().status).toBe("error");
+    expect(request).not.toHaveBeenCalled();
+  });
 });

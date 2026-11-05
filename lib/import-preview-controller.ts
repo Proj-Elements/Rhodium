@@ -46,10 +46,11 @@ export function createImportPreviewController(
         if (format === "json") {
           const data = JSON.parse(text) as Record<string, unknown>;
           backup = data.version ? data : undefined;
-          const rawRows = data.transactions || data.rows;
-          rows = Array.isArray(rawRows)
-            ? rawRows.filter((row): row is Record<string, unknown> => typeof row === "object" && row !== null)
-            : [];
+          const rawRows = data.transactions ?? data.rows ?? [];
+          if (!Array.isArray(rawRows) || rawRows.some((row) => typeof row !== "object" || row === null || Array.isArray(row))) {
+            throw new Error("账目必须是对象数组，文件中存在无法导入的记录");
+          }
+          rows = rawRows;
         } else {
           rows = parseCsv(text);
         }

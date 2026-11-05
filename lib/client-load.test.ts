@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { isCurrentMonthReady, runClientLoad } from "@/lib/client-load";
+import { isClientDataReady, isCurrentMonthReady, runClientLoad } from "@/lib/client-load";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -49,6 +49,11 @@ describe("client load lifecycle", () => {
 });
 
 describe("month-dependent mutation eligibility", () => {
+  it("blocks collection writes while loading and after a failed read", () => {
+    expect(isClientDataReady(true, "")).toBe(false);
+    expect(isClientDataReady(false, "offline")).toBe(false);
+    expect(isClientDataReady(false, "")).toBe(true);
+  });
   it.each([
     ["2026-11", "2026-10", false, ""],
     ["2026-11", "2026-11", false, "offline"],
