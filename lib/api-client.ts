@@ -2,9 +2,9 @@
 
 /**
  * Shared fetch wrapper for client pages: parses JSON defensively, throws a
- * descriptive Error carrying the server message, and passes through
- * AbortController signals. Replaces the response.json().catch(() => ({}))
- * boilerplate repeated on every page.
+ * descriptive Error carrying the server message, and preserves cancellation
+ * during both fetch and body consumption. Successful responses must contain a
+ * JSON object; an unreadable body is never treated as an empty success.
  */
 export async function apiFetch<T>(input: string, init?: RequestInit & { json?: unknown }): Promise<T> {
   const { json, ...rest } = init ?? {};
@@ -13,10 +13,20 @@ export async function apiFetch<T>(input: string, init?: RequestInit & { json?: u
     headers: json !== undefined ? { "Content-Type": "application/json", ...rest.headers } : rest.headers,
     body: json !== undefined ? JSON.stringify(json) : rest.body,
   });
-  const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok) {
-    throw new Error(typeof payload.error === "string" && payload.error ? payload.error : "请求失败，请稍后再试");
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    if (rest.signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
+    if (response.ok) throw new Error("服务器返回的数据格式不正确");
   }
+  rest.signal?.throwIfAborted();
+  const isObject = typeof payload === "object" && payload !== null && !Array.isArray(payload);
+  if (!response.ok) {
+    const message = isObject && "error" in payload ? payload.error : null;
+    throw new Error(typeof message === "string" && message ? message : "请求失败，请稍后再试");
+  }
+  if (!isObject) throw new Error("服务器返回的数据格式不正确");
   return payload as T;
 }
 

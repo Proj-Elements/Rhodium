@@ -48,6 +48,39 @@ describe("apiFetch", () => {
     expect(init.cache).toBe("no-store");
   });
 
+  it("propagates cancellation while the response body is being read", async () => {
+    const controller = new AbortController();
+    const aborted = new DOMException("The operation was aborted", "AbortError");
+    vi.stubGlobal("fetch", vi.fn(async () => ({
+      ok: true,
+      json: () => new Promise((_, reject) => {
+        controller.signal.addEventListener("abort", () => reject(aborted), { once: true });
+      }),
+    })));
+
+    const result = apiFetch("/api/dashboard", { signal: controller.signal });
+    const assertion = expect(result).rejects.toBe(aborted);
+    // The response headers have arrived; only body consumption is still pending.
+    await Promise.resolve();
+    controller.abort();
+    await assertion;
+  });
+
+  it("rejects malformed JSON in a successful response rather than returning an empty object", async () => {
+    stubFetch({ ok: true, throwOnJson: true });
+    await expect(apiFetch("/api/dashboard")).rejects.toThrow("服务器返回的数据格式不正确");
+  });
+
+  it.each([null, "not an object", 42])("rejects the invalid success payload %j", async (body) => {
+    stubFetch({ ok: true, body });
+    await expect(apiFetch("/api/dashboard")).rejects.toThrow("服务器返回的数据格式不正确");
+  });
+
+  it("uses the generic failure for a null error payload", async () => {
+    stubFetch({ ok: false, body: null });
+    await expect(apiFetch("/api/dashboard")).rejects.toThrow("请求失败，请稍后再试");
+  });
+
   it("throws the server message on an error response", async () => {
     stubFetch({ ok: false, body: { error: "请选择有效的分类" } });
     await expect(apiFetch("/api/transactions")).rejects.toThrow("请选择有效的分类");
