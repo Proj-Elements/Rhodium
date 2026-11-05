@@ -17,6 +17,26 @@ import { todayInShanghai } from "@/lib/domain";
  */
 export function useToday(): string | null {
   const [today, setToday] = useState<string | null>(null);
-  useEffect(() => setToday(todayInShanghai()), []);
+  useEffect(() => watchShanghaiDate(setToday), []);
   return today;
+}
+
+/** Publish the current Shanghai date, and return the subscription cleanup. */
+export function watchShanghaiDate(onChange: (date: string) => void): () => void {
+  let timer: ReturnType<typeof setTimeout>;
+  const update = () => {
+    clearTimeout(timer);
+    const today = todayInShanghai();
+    onChange(today);
+    const nextMidnight = new Date(`${today}T00:00:00+08:00`).getTime() + 24 * 60 * 60 * 1000;
+    timer = setTimeout(update, Math.max(1, nextMidnight - Date.now()));
+  };
+  update();
+  window.addEventListener("focus", update);
+  document.addEventListener("visibilitychange", update);
+  return () => {
+    clearTimeout(timer);
+    window.removeEventListener("focus", update);
+    document.removeEventListener("visibilitychange", update);
+  };
 }

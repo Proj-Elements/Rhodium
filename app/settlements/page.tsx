@@ -11,6 +11,7 @@ import { Icon } from "@/components/icon";
 import { MonthSwitcher } from "@/components/month-switcher";
 import { Toast, useFlash } from "@/components/toast";
 import { apiFetch, errorMessage } from "@/lib/api-client";
+import { isCurrentMonthReady, runClientLoad } from "@/lib/client-load";
 import { formatMoney, monthStart, todayInShanghai } from "@/lib/domain";
 import { useToday } from "@/lib/use-today";
 
@@ -97,7 +98,7 @@ export default function SettlementsPage() {
   const [trend, setTrend] = useState<Summary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [confirmSettle, setConfirmSettle] = useState(false);
+  const [confirmSettle, setConfirmSettle] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const deepLinkHandled = useRef(false);
@@ -116,24 +117,25 @@ export default function SettlementsPage() {
     }
     if (!month) return;
     const controller = new AbortController();
-    async function load() {
-      setLoading(true);
-      setError("");
-      try {
-        const result = await apiFetch<{ summaries: Summary[]; focus: Summary | null }>(
-          `/api/settlements?end=${month}&include=focus`,
-          { signal: controller.signal },
-        );
-        setSummary(result.focus ?? result.summaries.find((item) => item.month === month) ?? null);
+    setLoading(true);
+    setError("");
+    setSummary(null);
+    setConfirmSettle(null);
+    void runClientLoad({
+      signal: controller.signal,
+      work: () => apiFetch<{ summaries: Summary[]; focus: Summary | null }>(
+        `/api/settlements?end=${month}&include=focus`,
+        { signal: controller.signal },
+      ),
+      success: (result) => {
+        const focus = result.focus?.month === month ? result.focus : result.summaries.find((item) => item.month === month);
+        setSummary(focus ?? null);
         setTrend(result.summaries || []);
-      } catch (loadError) {
-        if (loadError instanceof DOMException && loadError.name === "AbortError") return;
-        setError(errorMessage(loadError, "暂时无法读取月度回顾"));
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    }
-    void load();
+      },
+      failure: setError,
+      finished: () => setLoading(false),
+      fallback: "暂时无法读取月度回顾",
+    });
     return () => controller.abort();
   }, [month, reloadToken]);
 
@@ -145,12 +147,17 @@ export default function SettlementsPage() {
     }
   }, [month]);
 
+  const ready = isCurrentMonthReady(month, summary?.month, loading, error);
+  const settled = ready && Boolean(summary?.settlement && !summary.settlement.reopenedAt);
+  const canSettle = ready && !settled && Boolean(status) && status !== "future" && !busy;
+  const canReopen = ready && settled && !busy;
+
   async function settle() {
-    if (!status || status === "future" || busy) return;
+    if (!canSettle || confirmSettle !== month) return;
     setBusy(true);
     try {
       await apiFetch(`/api/settlements/${month}/settle`, { method: "POST" });
-      setConfirmSettle(false);
+      setConfirmSettle(null);
       flash("本月已结算");
       reload();
     } catch (settleError) {
@@ -161,7 +168,7 @@ export default function SettlementsPage() {
   }
 
   async function reopen() {
-    if (busy) return;
+    if (!canReopen) return;
     setBusy(true);
     try {
       await apiFetch(`/api/settlements/${month}/reopen`, { method: "POST" });
@@ -174,7 +181,6 @@ export default function SettlementsPage() {
     }
   }
 
-  const settled = Boolean(summary?.settlement && !summary.settlement.reopenedAt);
   const netCents = summary ? summary.incomeCents - summary.expenseCents : 0;
   const settledAt = summary?.settlement?.settledAt
     ? new Intl.DateTimeFormat("zh-CN", {
@@ -204,7 +210,7 @@ export default function SettlementsPage() {
   );
 
   return (
-    <AppShell actions={<><MonthSwitcher month={month} onChange={setMonth} />{settled ? <Button variant="outline" onPress={() => void reopen()} isPending={busy}>重新打开</Button> : <Button onPress={() => setConfirmSettle(true)} isDisabled={loading || !summary || status === "future" || !status} isPending={busy}><Icon name="check" size={15} />完成结算</Button>}</>}>
+    <AppShell actions={<><MonthSwitcher month={month} onChange={setMonth} isDisabled={busy} />{settled ? <Button variant="outline" onPress={() => void reopen()} isDisabled={!canReopen} isPending={busy}>重新打开</Button> : <Button onPress={() => { if (canSettle) setConfirmSettle(month); }} isDisabled={!canSettle} isPending={busy}><Icon name="check" size={15} />完成结算</Button>}</>}>
       <div className="page-stack">
         {loading ? <div className="grid grid-cols-2 gap-4 lg:grid-cols-4" aria-busy="true" aria-label="正在读取月度回顾">{[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-40 rounded-[20px]" />)}<Skeleton className="col-span-2 h-96 rounded-[20px] lg:col-span-4" /></div> : error ? <Alert status="danger"><Alert.Indicator /><Alert.Content><Alert.Title>{error}</Alert.Title><Button variant="outline" size="sm" className="mt-3" onPress={reload}>重新加载</Button></Alert.Content></Alert> : !summary ? <Alert status="warning"><Alert.Indicator /><Alert.Content><Alert.Title>暂时没有可显示的月度回顾。</Alert.Title></Alert.Content></Alert> : (
           <>
@@ -228,7 +234,7 @@ export default function SettlementsPage() {
           </>
         )}
       </div>
-      {confirmSettle && <ConfirmDialog title={`结算 ${monthLabel(month)}？`} description="结算后会保存当前预算、收支和分类快照，该月账目将变为只读。之后如需补记，仍可重新打开。" confirmLabel="确认结算" busy={busy} onConfirm={() => void settle()} onClose={() => setConfirmSettle(false)} />}
+      {confirmSettle === month && ready && <ConfirmDialog title={`结算 ${monthLabel(month)}？`} description="结算后会保存当前预算、收支和分类快照，该月账目将变为只读。之后如需补记，仍可重新打开。" confirmLabel="确认结算" busy={busy} onConfirm={() => void settle()} onClose={() => setConfirmSettle(null)} />}
       {message && <Toast message={message} />}
     </AppShell>
   );

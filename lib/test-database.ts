@@ -9,7 +9,7 @@ export type TestDatabaseIdentity = { database: string; user: string; schema: str
  * so URL inspection cannot approve one target while the driver reaches another.
  * Error messages deliberately omit the supplied URL and its credentials.
  */
-export function requireTestDatabase(env: Pick<NodeJS.ProcessEnv, "TEST_DATABASE_URL">): TestDatabaseTarget {
+export function requireTestDatabase(env: Record<string, string | undefined>): TestDatabaseTarget {
   const raw = env.TEST_DATABASE_URL;
   const reject = () => new Error("TEST_DATABASE_URL 必须显式指向本机 PostgreSQL 测试库（库名以 _test 或 _test_<标识> 结尾，schema=public）");
   if (!raw) throw reject();

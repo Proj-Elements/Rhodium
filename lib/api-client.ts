@@ -23,7 +23,7 @@ export async function apiFetch<T>(input: string, init?: RequestInit & { json?: u
   rest.signal?.throwIfAborted();
   const isObject = typeof payload === "object" && payload !== null && !Array.isArray(payload);
   if (!response.ok) {
-    const message = isObject && "error" in payload ? payload.error : null;
+    const message = typeof payload === "object" && payload !== null && "error" in payload ? payload.error : null;
     throw new Error(typeof message === "string" && message ? message : "请求失败，请稍后再试");
   }
   if (!isObject) throw new Error("服务器返回的数据格式不正确");

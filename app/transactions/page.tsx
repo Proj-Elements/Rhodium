@@ -13,6 +13,7 @@ import { MonthSwitcher } from "@/components/month-switcher";
 import { Toast, useFlash } from "@/components/toast";
 import { TransactionForm } from "@/components/transaction-form";
 import { apiFetch, errorMessage } from "@/lib/api-client";
+import { isCurrentMonthReady, runClientLoad } from "@/lib/client-load";
 import { getCategoryColor, getCategoryColors } from "@/lib/category-colors";
 import { dateLabel, formatMoney, todayInShanghai } from "@/lib/domain";
 import { consumeNewTransactionIntent, subscribeNewTransactionIntent } from "@/lib/new-transaction-intent";
@@ -41,6 +42,7 @@ export default function TransactionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [readOnly, setReadOnly] = useState(false);
+  const [loadedMonth, setLoadedMonth] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<TransactionDTO | null>(null);
   const [undoId, setUndoId] = useState<string | null>(null);
@@ -53,27 +55,29 @@ export default function TransactionsPage() {
 
   const reload = () => setReloadToken((token) => token + 1);
 
-  async function load(signal?: AbortSignal) {
+  async function load(signal: AbortSignal) {
     setLoading(true);
     setError("");
-    try {
-      const [transactionResult, categoryResult] = await Promise.all([
+    await runClientLoad({
+      signal,
+      work: () => Promise.all([
         apiFetch<TransactionsPayload>(`/api/transactions?month=${month}`, { signal }),
         apiFetch<{ categories: CategoryDTO[] }>("/api/categories", { signal }),
-      ]);
-      setTransactions(transactionResult.transactions || []);
-      setReadOnly(Boolean(transactionResult.readOnly));
-      if (transactionResult.readOnly) {
-        setShowForm(false);
-        setEditing(null);
-      }
-      setCategories(categoryResult.categories || []);
-    } catch (loadError) {
-      if (loadError instanceof DOMException && loadError.name === "AbortError") return;
-      setError(errorMessage(loadError, "暂时无法读取账目"));
-    } finally {
-      if (!signal?.aborted) setLoading(false);
-    }
+      ]),
+      success: ([transactionResult, categoryResult]) => {
+        setTransactions(transactionResult.transactions || []);
+        setLoadedMonth(transactionResult.month);
+        setReadOnly(Boolean(transactionResult.readOnly));
+        if (transactionResult.readOnly) {
+          setShowForm(false);
+          setEditing(null);
+        }
+        setCategories(categoryResult.categories || []);
+      },
+      failure: setError,
+      finished: () => setLoading(false),
+      fallback: "暂时无法读取账目",
+    });
   }
 
   useEffect(() => {
@@ -195,12 +199,14 @@ export default function TransactionsPage() {
   const today = todayInShanghai();
   const defaultEntryDate = !month || month === today.slice(0, 7) ? today : `${month}-01`;
 
+  const ready = isCurrentMonthReady(month, loadedMonth, loading, error);
+
   function openNew() {
-    if (!readOnly) setShowForm(true);
+    if (ready && !readOnly) setShowForm(true);
   }
 
   return (
-    <AppShell actions={<><MonthSwitcher month={month} onChange={setMonth} /><Button onPress={openNew} isDisabled={readOnly || loading}><Icon name="plus" size={16} />记一笔</Button></>}>
+    <AppShell actions={<><MonthSwitcher month={month} onChange={setMonth} /><Button onPress={openNew} isDisabled={readOnly || !ready}><Icon name="plus" size={16} />记一笔</Button></>}>
       <div className="page-stack">
         <section className="grid grid-cols-1 gap-4 sm:grid-cols-3 reveal" aria-label="账目汇总">
           <MetricCard label={filtering ? "筛选后支出" : "当月支出"} value={loading ? "—" : formatMoney(totals.expenseCents)} detail="日常所需，也有心之所向" icon="expense" />
@@ -249,7 +255,7 @@ export default function TransactionsPage() {
           </div>
         )}
       </div>
-      {(showForm || editing) && !readOnly && <TransactionForm categories={categories} transaction={editing} defaultDate={defaultEntryDate} onClose={() => { setShowForm(false); setEditing(null); }} onSaved={() => { setShowForm(false); setEditing(null); reload(); }} />}
+      {(showForm || editing) && ready && !readOnly && <TransactionForm categories={categories} transaction={editing} defaultDate={defaultEntryDate} onClose={() => { setShowForm(false); setEditing(null); }} onSaved={() => { setShowForm(false); setEditing(null); reload(); }} />}
       {pendingDelete && <ConfirmDialog title="删除这笔记录？" description={`「${pendingDelete.note || pendingDelete.category.name}」将从账本中移除。删除后 5 秒内可以撤销，月度统计也会同步更新。`} confirmLabel="删除记录" danger busy={Boolean(deletingId)} onConfirm={() => void remove(pendingDelete)} onClose={() => setPendingDelete(null)} />}
       {undoId && <Toast message="记录已删除" action="撤销" onAction={() => void undo()} />}
       {!undoId && message && <Toast message={message} />}

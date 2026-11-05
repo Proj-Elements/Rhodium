@@ -11,6 +11,7 @@ import { CategoryIcon, Icon } from "@/components/icon";
 import { SubscriptionForm } from "@/components/subscription-form";
 import { Toast, useFlash } from "@/components/toast";
 import { apiFetch, errorMessage } from "@/lib/api-client";
+import { runClientLoad } from "@/lib/client-load";
 import { getCategoryColor, getCategoryColors } from "@/lib/category-colors";
 import { formatMoney, todayInShanghai } from "@/lib/domain";
 import { CategoryDTO, SubscriptionDTO } from "@/lib/types";
@@ -40,24 +41,22 @@ export default function SubscriptionsPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    async function load() {
-      setLoading(true);
-      setError("");
-      try {
-        const [subscriptionResult, categoryResult] = await Promise.all([
-          apiFetch<{ subscriptions: SubscriptionDTO[] }>("/api/subscriptions", { signal: controller.signal }),
-          apiFetch<{ categories: CategoryDTO[] }>("/api/categories", { signal: controller.signal }),
-        ]);
+    setLoading(true);
+    setError("");
+    void runClientLoad({
+      signal: controller.signal,
+      work: () => Promise.all([
+        apiFetch<{ subscriptions: SubscriptionDTO[] }>("/api/subscriptions", { signal: controller.signal }),
+        apiFetch<{ categories: CategoryDTO[] }>("/api/categories", { signal: controller.signal }),
+      ]),
+      success: ([subscriptionResult, categoryResult]) => {
         setSubscriptions(subscriptionResult.subscriptions || []);
         setCategories(categoryResult.categories || []);
-      } catch (loadError) {
-        if (loadError instanceof DOMException && loadError.name === "AbortError") return;
-        setError(errorMessage(loadError, "暂时无法读取固定支出"));
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    }
-    void load();
+      },
+      failure: setError,
+      finished: () => setLoading(false),
+      fallback: "暂时无法读取固定支出",
+    });
     return () => controller.abort();
   }, [reloadToken]);
 

@@ -13,6 +13,7 @@ import { MonthSwitcher } from "@/components/month-switcher";
 import { Toast, useFlash } from "@/components/toast";
 import { TransactionForm } from "@/components/transaction-form";
 import { apiFetch, errorMessage } from "@/lib/api-client";
+import { isCurrentMonthReady, runClientLoad } from "@/lib/client-load";
 import { getCategoryColor, getCategoryColors } from "@/lib/category-colors";
 import { expenseSharePercent } from "@/lib/category-breakdown";
 import { formatMoney } from "@/lib/domain";
@@ -118,29 +119,30 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!month) return;
     const controller = new AbortController();
-    async function load() {
-      setLoading(true);
-      setError("");
-      try {
-        const [dashboard, categoryResult] = await Promise.all([
-          apiFetch<DashboardDTO>(`/api/dashboard?month=${month}`, { signal: controller.signal }),
-          apiFetch<{ categories: CategoryDTO[] }>("/api/categories", { signal: controller.signal }),
-        ]);
+    setLoading(true);
+    setError("");
+    void runClientLoad({
+      signal: controller.signal,
+      work: () => Promise.all([
+        apiFetch<DashboardDTO>(`/api/dashboard?month=${month}`, { signal: controller.signal }),
+        apiFetch<{ categories: CategoryDTO[] }>("/api/categories", { signal: controller.signal }),
+      ]),
+      success: ([dashboard, categoryResult]) => {
         setData(dashboard);
         setCategories(categoryResult.categories || []);
         setBudgetInput("");
-      } catch (loadError) {
-        if (loadError instanceof DOMException && loadError.name === "AbortError") return;
-        setError(errorMessage(loadError, "暂时无法打开仪表盘"));
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    }
-    void load();
+      },
+      failure: setError,
+      finished: () => setLoading(false),
+      fallback: "暂时无法打开仪表盘",
+    });
     return () => controller.abort();
   }, [month, reloadToken]);
 
+  const ready = isCurrentMonthReady(month, data?.month, loading, error);
+
   async function saveBudget() {
+    if (!ready || budgetSaving) return;
     if (!budgetInput.trim()) {
       flash("先输入一个预算金额");
       return;
@@ -179,9 +181,9 @@ export default function DashboardPage() {
   ]), [categories, data]);
 
   return (
-    <AppShell actions={<><MonthSwitcher month={month} onChange={setMonth} /><Button onPress={() => setShowForm(true)} isDisabled={!data || loading}><Icon name="plus" size={16} />记一笔</Button></>}>
+    <AppShell actions={<><MonthSwitcher month={month} onChange={setMonth} /><Button onPress={() => setShowForm(true)} isDisabled={!ready}><Icon name="plus" size={16} />记一笔</Button></>}>
       <div className="page-stack">
-        {loading ? (
+        {loading || (!error && data?.month !== month) ? (
           <div className="grid gap-5 lg:grid-cols-12" aria-label="正在读取财务总览" aria-busy="true">
             <Skeleton className="h-[270px] rounded-[22px] lg:col-span-5" />
             <div className="grid grid-cols-2 gap-4 lg:col-span-7">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-32 rounded-[20px]" />)}</div>
@@ -263,7 +265,7 @@ export default function DashboardPage() {
           </>
         )}
       </div>
-      {showForm && data && <TransactionForm categories={categories} defaultDate={data.focusDate} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); reload(); }} />}
+      {showForm && ready && data && <TransactionForm categories={categories} defaultDate={data.focusDate} onClose={() => setShowForm(false)} onSaved={() => { setShowForm(false); reload(); }} />}
       {message && <Toast message={message} />}
     </AppShell>
   );
