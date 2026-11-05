@@ -1,4 +1,4 @@
-FROM node:20-alpine AS base
+FROM node:22.23.4-alpine3.24 AS base
 RUN apk add --no-cache openssl libc6-compat
 
 # One install for the whole build. Both the builder and the Prisma CLI copied into
@@ -16,7 +16,10 @@ WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+# The hpsetup key is only available during this layer and is never baked into the image.
+RUN --mount=type=secret,id=heroui_key,required=true \
+    HEROUI_KEY="$(cat /run/secrets/heroui_key)" CI=1 npx -y hpsetup@4.7.4 react --auto --no-cache && \
+    npm run build
 
 FROM base AS runner
 WORKDIR /app

@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
+import { Button, Card } from "@heroui/react";
+import { Icon } from "@/components/icon";
 
 /**
  * Page-level boundary. It renders inside the root layout's <body>, so it must
@@ -12,21 +14,26 @@ export default function RouteError({ error, reset }: { error: Error & { digest?:
   }, [error]);
 
   return (
-    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ maxWidth: 420, padding: 32, textAlign: "center" }}>
-        <h1 style={{ fontSize: 22, fontWeight: 600, margin: "0 0 12px" }}>页面出了点问题</h1>
-        <p style={{ color: "var(--body, #5a5852)", fontSize: 14, lineHeight: 1.6, margin: "0 0 20px" }}>
-          账本数据没有受到影响。可以重试一下，或者回到概览页继续记账。
+    <main className="grid min-h-screen place-items-center bg-background p-6 text-foreground">
+      <Card className="panel w-full max-w-md items-center p-8 text-center sm:p-12">
+        <span className="mb-5 flex size-12 items-center justify-center rounded-2xl bg-warning-soft text-warning-soft-foreground"><Icon name="info" size={24} /></span>
+        <p className="mb-2 text-xs text-muted">Rhodium · 稍作停留</p>
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">页面暂时没能打开</h1>
+        <p className="mt-3 text-sm leading-7 text-muted">
+          可以重新加载试试，或先回到总览。如果问题持续，请检查应用服务与数据库连接。
         </p>
-        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
-          <button type="button" onClick={reset} style={{ minHeight: 40, padding: "10px 18px", border: 0, borderRadius: 8, background: "var(--orange, #f54e00)", color: "#fff", fontSize: 14, cursor: "pointer" }}>
+        <div className="mt-6 flex items-center justify-center gap-3">
+          <Button variant="primary" onPress={reset}>
             重试
-          </button>
-          <a href="/dashboard" style={{ display: "inline-flex", alignItems: "center", minHeight: 40, padding: "10px 18px", border: "1px solid var(--line, #e6e5e0)", borderRadius: 8, background: "var(--on-primary, #fff)", color: "var(--ink, #26251e)", fontSize: 14, textDecoration: "none" }}>
-            回到概览
+          </Button>
+          <a
+            href="/dashboard"
+            className="inline-flex h-10 items-center justify-center rounded-xl bg-surface-secondary px-4 text-sm font-medium text-foreground transition hover:bg-default"
+          >
+            回到总览
           </a>
         </div>
-      </div>
+      </Card>
     </main>
   );
 }

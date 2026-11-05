@@ -1,4 +1,4 @@
-# 月余 Docker 部署包
+# Rhodium Docker 部署包
 
 本目录用于**用预构建镜像**部署（不含构建上下文）。若想直接从源码构建运行，请在仓库根目录执行 `docker compose up -d --build`。
 

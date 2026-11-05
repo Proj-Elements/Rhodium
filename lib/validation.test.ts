@@ -235,6 +235,24 @@ describe("category schemas", () => {
     expect(categoryPatchSchema.safeParse({ archived: true }).success).toBe(true);
     expect(categoryPatchSchema.safeParse({ sortOrder: 2 }).success).toBe(false);
   });
+
+  it("preserves a chosen icon on create, patch and backup restore", () => {
+    expect(categorySchema.parse({ name: "咖啡时间", icon: "coffee" })).toMatchObject({ icon: "coffee" });
+    expect(categoryPatchSchema.parse({ icon: "coffee" })).toEqual({ icon: "coffee" });
+    expect(backupSchema.parse({ categories: [{ id: "c1", name: "咖啡时间", icon: "coffee" }] }).categories?.[0].icon).toBe("coffee");
+  });
+
+  it("allows automatic icons and legacy backups without an icon", () => {
+    expect(categorySchema.parse({ name: "自动分类", icon: null })).toHaveProperty("icon", null);
+    expect(categoryPatchSchema.parse({ icon: null })).toEqual({ icon: null });
+    expect(backupSchema.parse(exportedBackup).categories?.[0]).not.toHaveProperty("icon");
+  });
+
+  it.each(["missing-icon", "https://example.com/icon.svg", "<svg />", "", 42])("rejects unsupported icon %j", (icon) => {
+    expect(categorySchema.safeParse({ name: "分类", icon }).success).toBe(false);
+    expect(categoryPatchSchema.safeParse({ icon }).success).toBe(false);
+    expect(backupSchema.safeParse({ categories: [{ id: "c1", name: "分类", icon }] }).success).toBe(false);
+  });
 });
 
 describe("importSchema", () => {

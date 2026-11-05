@@ -20,6 +20,7 @@ export type CategoryLike = {
   id: string;
   name: string;
   type: Category["type"];
+  icon: string | null;
   isSystem: boolean;
   sortOrder: number;
   archivedAt: Date | null;
@@ -56,6 +57,7 @@ export function serializeCategory(category: CategoryLike): CategoryDTO {
     id: category.id,
     name: category.name,
     type: category.type,
+    icon: category.icon,
     isSystem: category.isSystem,
     sortOrder: category.sortOrder,
     archivedAt: category.archivedAt ? category.archivedAt.toISOString() : null,

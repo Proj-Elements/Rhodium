@@ -33,7 +33,12 @@ export function useColorMode() {
   // keep following the OS scheme live.
   useEffect(() => {
     const apply = () => {
-      document.documentElement.dataset.colorScheme = schemeForMode(mode);
+      const scheme = schemeForMode(mode);
+      const el = document.documentElement;
+      el.dataset.colorScheme = scheme;
+      el.dataset.theme = scheme;
+      el.classList.toggle("dark", scheme === "dark");
+      el.classList.toggle("light", scheme === "light");
     };
     apply();
     if (mode !== "system") return;

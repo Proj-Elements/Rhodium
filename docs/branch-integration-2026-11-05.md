@@ -4,9 +4,11 @@
 
 The user authorized committing and integrating all completed local branches into
 `main`, then deleting the integrated branch refs and synchronizing to GitHub and
-Entire. The actively edited `codex/ledger-redesign` branch is explicitly excluded.
-All integration work takes place in an isolated Git worktree; the original
-checkout and its staged, unstaged, untracked and ignored files are not modified.
+Entire. The actively edited `codex/ledger-redesign` branch was initially excluded;
+the user subsequently confirmed completion and explicitly authorized its merge.
+Integration takes place in an isolated Git worktree. The original checkout's
+completed work is committed in coherent items; ignored files and live services
+are preserved.
 
 The initial `main` tip is `79a5dca9c34b519f001c228366d8eff5842ef9a3`.
 The two other checked-out Freebuff branches are clean at that same commit; no
@@ -20,7 +22,7 @@ uncommitted work was found outside the protected redesign checkout.
 | `freebuff/hi-0cb3714c-4fdb-4ab2-ba66-bfdff263ffdb` | `79a5dca` | Already contained in the initial main history. |
 | `freebuff/task-9c01e1a1-8883-4a30-bdba-c95a014c1a0f` | `79a5dca` | Already contained in the initial main history; preserve its worktree. |
 | `freebuff/who-ar-3d573f00-1902-4530-af32-d57e75455d96` | `79a5dca` | Already contained in the initial main history; preserve its worktree. |
-| `codex/ledger-redesign` | `eca5ac8` | Protected: do not commit, merge, switch or delete this checkout or branch. |
+| `codex/ledger-redesign` | `eca5ac8` | Subsequently authorized; preserve its complete UI and category-icon contracts alongside main's reimbursement behavior. |
 
 Existing Freebuff snapshot tags and other non-branch checkpoint refs are retained.
 
@@ -81,16 +83,46 @@ reimbursement column.
 No version tag, release or deployment is created by this maintenance task.
 Remote CI and remote synchronization are not local-verification results.
 
-## Outstanding remote delivery
+## Completed redesign integration
 
-- TODO: Synchronize the final integrated `main` to the authorized GitHub
-  repository. This checkout has no Git remote, and no repository named Journal,
-  yueyu or ledger was found in the authenticated account. Remove this item after
-  confirming the destination, branch policies, shared ancestry, pushed SHA and
-  current CI results. Do not invent a destination or force-push unrelated history.
-- TODO: Synchronize to the authorized Entire repository and checkpoint backend.
-  Entire status reports `enabled: false`, and Brain reports disconnected with no
-  repository manifest. Remove this item only after the destination and any setup
-  authorization are explicit, outgoing session sharing is audited, and the final
-  history and applicable checkpoints are confirmed remotely. Do not silently
-  enable hooks, create repositories or fabricate checkpoint trailers.
+The source checkout's remaining work is recorded in signed Codex commits
+`2ab8df8` (settlement/import protection), `cde9bb8` (complete UI), and `9dec444`
+(secret-mounted container initialization). All source files are now committed.
+The merge retains strict reimbursement/undo, soft-delete backup stamps, batched
+summary/cache behavior, and the category-icon migration. HeroUI dialogs now expose
+both reimbursement actions without submitting a browser navigation.
+
+A settlement records gross expenses and net remaining. The dashboard recovers
+net budget consumption from the captured budget/remaining, not from a subsequently
+changed preset; no-budget snapshots subtract the protected reimbursement total.
+Monthly review keeps gross expenses and separately reports self-paid amounts.
+The new regression covers reimbursing, settling with/without a budget, changing
+the preset, rejecting locked undo, reopening, and undoing reimbursement.
+
+On the integrated source: 146 tests in 11 affected unit modules and 54 tests in
+four database modules pass. Typecheck and focused ESLint pass. All six migrations
+deploy only to the disposable test database. These are local results, not CI or
+production evidence.
+
+## Remote Delivery State
+
+The authorized GitHub destination is `git@github.com:Proj-Elements/Rhodium.git`;
+Entire `origin` is `entire://aws-ap-southeast-1.entire.io/et/elements/rhodium`.
+Both initially have no branch heads. SSH port 22 is unavailable; authenticated
+HTTPS works through a per-command rewrite without changing the configured URL.
+GitHub private-repository protections/rulesets are unavailable on its current
+plan (403); no policy was removed or bypassed.
+
+HeroUI initialization was verified by a fresh, non-cache download using pinned
+`hpsetup@4.7.4`; package/lock content is unchanged. `HEROUI_KEY` exists as a
+repository Actions Secret. No key is stored in tracked files or Docker arguments.
+
+- TODO(delivery): Complete the integrated build, rendered/container checks,
+  scoped Actions checks for the exact pushed SHA, and synchronization of one
+  final main history to both destinations. Remove after remote alignment and
+  safe branch-ref cleanup are verified; do not deploy the production service.
+- TODO(traceability): Entire is enabled, but Codex hook trust approval is missing
+  and this session has no Entire session state. Outgoing checkpoint inventory is
+  empty. Code synchronization cannot create the missing capture retroactively;
+  the user must review hook trust for future sessions. Do not fabricate trailers,
+  amend commits, enable hooks or upload this secret-bearing session manually.

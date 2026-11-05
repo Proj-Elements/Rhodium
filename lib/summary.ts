@@ -100,6 +100,22 @@ function summarizeMonth(
   const today = todayInShanghai();
   const currentMonth = today.slice(0, 7);
   const elapsedDays = month === currentMonth ? Number(today.slice(8, 10)) : daysInMonth(month);
+  const settled = settlement !== null && settlement.reopenedAt === null;
+  const budgetCents = settled
+    ? settlement.remainingAmountCents === null
+      ? null
+      : settlement.budgetAmountCents
+    : budget.amountCents;
+  const reportedExpenseCents = settled ? settlement.expenseAmountCents : expenseCents;
+  const reportedIncomeCents = settled ? settlement.incomeAmountCents : incomeCents;
+  // A snapshot stores gross expenses but net remaining. Recover its budget
+  // consumption without consulting a preset that may have changed since close.
+  const reportedOutOfPocketCents = settled
+    ? settlement.remainingAmountCents === null
+      ? settlement.expenseAmountCents - reimbursedCents
+      : settlement.budgetAmountCents - settlement.remainingAmountCents
+    : outOfPocketCents;
+  const remainingCents = settled ? settlement.remainingAmountCents : calculateRemaining(budgetCents, reportedOutOfPocketCents);
   const dailyBreakdown = Array.from({ length: daysInMonth(month) }, (_, index) => {
     const date = `${month}-${String(index + 1).padStart(2, "0")}`;
     return { date, ...(dailyByDate.get(date) ?? { expenseCents: 0, incomeCents: 0, transactionCount: 0 }) };
@@ -107,16 +123,15 @@ function summarizeMonth(
 
   return {
     month,
-    budgetCents: budget.amountCents,
+    budgetCents,
     budgetSource: budget.source,
-    expenseCents,
-    outOfPocketCents,
+    expenseCents: reportedExpenseCents,
+    outOfPocketCents: reportedOutOfPocketCents,
     reimbursedCents,
     reimbursedCount,
-    incomeCents,
-    // 预算与剩余都按自付金额算：报销回来的是“要还的钱”，不是预算内消费。
-    remainingCents: calculateRemaining(budget.amountCents, outOfPocketCents),
-    dailyAverageCents: outOfPocketCents ? Math.round(outOfPocketCents / Math.max(1, elapsedDays)) : 0,
+    incomeCents: reportedIncomeCents,
+    remainingCents,
+    dailyAverageCents: reportedOutOfPocketCents ? Math.round(reportedOutOfPocketCents / Math.max(1, elapsedDays)) : 0,
     dailyBreakdown,
     topCategory,
     topDate: topDate ? { date: topDate[0], amountCents: topDate[1] } : null,

@@ -4,6 +4,8 @@ import { GET as getDashboard } from "@/app/api/dashboard/route";
 import { GET as exportBackup } from "@/app/api/export/route";
 import { POST as importBackup } from "@/app/api/import/route";
 import { GET as getSettlementSummary } from "@/app/api/settlements/[month]/route";
+import { POST as settleMonth } from "@/app/api/settlements/[month]/settle/route";
+import { POST as reopenMonth } from "@/app/api/settlements/[month]/reopen/route";
 import { GET as listTransactions, POST as createTransaction } from "@/app/api/transactions/route";
 import { DELETE as deleteTransaction, PATCH as patchTransaction } from "@/app/api/transactions/[id]/route";
 import { monthStart } from "@/lib/domain";
@@ -167,6 +169,32 @@ describe("PATCH /api/transactions/[id] { reimburse: true }", () => {
 });
 
 describe("reimbursement flows through the aggregates", () => {
+  it.each([null, 20_000])("freezes net amounts after settling with budget %s, then resumes live values on reopen", async (initialBudget) => {
+    if (initialBudget !== null) await prisma.budgetPreset.create({ data: { id: 1, amountCents: initialBudget } });
+    const id = await createExpense("30.00", `${MONTH}-05`);
+    await createExpense("70.00", `${MONTH}-06`);
+    await reimburse(id);
+    const context = routeContext({ month: MONTH });
+    expect((await settleMonth(new Request("http://localhost", { method: "POST" }), context)).status).toBe(200);
+    await prisma.budgetPreset.upsert({ where: { id: 1 }, create: { id: 1, amountCents: 50_000 }, update: { amountCents: 50_000 } });
+
+    const remainingCents = initialBudget === null ? null : initialBudget - 7_000;
+    expect(await getMonthSummary(MONTH)).toMatchObject({
+      budgetCents: initialBudget, expenseCents: 10_000, outOfPocketCents: 7_000,
+      reimbursedCents: 3_000, incomeCents: 0, remainingCents,
+    });
+    const dashboard = await (await getDashboard(new Request(`http://localhost/api/dashboard?month=${MONTH}`))).json();
+    expect(dashboard).toMatchObject({ expenseCents: 7_000, outOfPocketCents: 7_000, reimbursedCents: 3_000, remainingCents });
+    expect(dashboard.budget).toEqual(initialBudget === null ? null : { amountCents: initialBudget });
+    expect((await unreimburse(id)).status).toBe(409);
+
+    expect((await reopenMonth(new Request("http://localhost", { method: "POST" }), context)).status).toBe(200);
+    expect(await getMonthSummary(MONTH)).toMatchObject({ budgetCents: 50_000, expenseCents: 10_000, outOfPocketCents: 7_000, remainingCents: 43_000 });
+    expect((await unreimburse(id)).status).toBe(200);
+    const reopened = await (await getDashboard(new Request(`http://localhost/api/dashboard?month=${MONTH}`))).json();
+    expect(reopened).toMatchObject({ expenseCents: 10_000, reimbursedCents: 0, remainingCents: 40_000 });
+  });
+
   it("dashboard excludes reimbursed expenses from totals, budget and category breakdown", async () => {
     const reimbursedId = await createExpense("30.00", `${MONTH}-05`);
     const keptId = await createExpense("70.00", `${MONTH}-06`);

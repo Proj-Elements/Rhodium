@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { moneyToCents } from "@/lib/domain";
+import { categoryIconNames } from "@/lib/category-icons";
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 const monthPattern = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -24,6 +25,7 @@ const dateValue = z
   }, "日期无效");
 
 const monthValue = z.string().regex(monthPattern, "月份格式应为 YYYY-MM");
+const categoryIconValue = z.enum(categoryIconNames).nullable().optional();
 
 export const transactionSchema = z.object({
   type: z.enum(["expense", "income"]),
@@ -81,12 +83,14 @@ export const transactionUnreimburseSchema = z
 export const categorySchema = z.object({
   name: z.string().trim().min(1).max(30),
   type: z.enum(["expense", "income", "both"]).default("expense"),
+  icon: categoryIconValue,
 });
 
 export const categoryPatchSchema = z
   .object({
     name: z.string().trim().min(1).max(30).optional(),
     archived: z.boolean().optional(),
+    icon: categoryIconValue,
   })
   .strict()
   .refine((body) => Object.keys(body).length > 0, "没有需要更新的字段");
@@ -109,6 +113,7 @@ const backupCategorySchema = z.object({
   isSystem: z.union([z.boolean(), z.string()]).optional(),
   sortOrder: z.union([z.number(), z.string()]).optional(),
   archivedAt: z.string().optional().nullable(),
+  icon: categoryIconValue,
 });
 
 const backupSubscriptionSchema = z.object({

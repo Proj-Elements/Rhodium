@@ -1,19 +1,28 @@
+"use client";
+
 import Link from "next/link";
+import { Card } from "@heroui/react";
 
 /** Renders inside the root layout's <body>; no <html>/<body> here. */
 export default function NotFound() {
   return (
-    <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ maxWidth: 420, padding: 32, textAlign: "center" }}>
-        <p style={{ margin: "0 0 8px", color: "var(--muted, #807d72)", fontSize: 13, letterSpacing: 1 }}>404</p>
-        <h1 style={{ fontSize: 22, fontWeight: 600, margin: "0 0 12px" }}>这里没有账目</h1>
-        <p style={{ color: "var(--body, #5a5852)", fontSize: 14, lineHeight: 1.6, margin: "0 0 20px" }}>
-          你访问的页面不存在，或者已经被移动了。
+    <main className="grid min-h-screen place-items-center bg-background p-6 text-foreground">
+      <Card className="panel w-full max-w-md items-center p-8 text-center sm:p-12">
+        <span className="brand-mark mb-6" aria-hidden="true"><svg viewBox="0 0 64 64" fill="none"><path d="M22 46V18h12a9 9 0 0 1 0 18H22m12 0 10 10" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" /></svg></span>
+        <p className="text-6xl font-medium tracking-tighter tabular-nums text-accent/40">404</p>
+        <h1 className="mt-5 text-2xl font-semibold tracking-tight text-foreground">这一页，走丢了</h1>
+        <p className="mt-3 text-sm leading-7 text-muted">
+          这里暂时没有内容。回到熟悉的地方，继续记录你的生活。
         </p>
-        <Link href="/dashboard" style={{ display: "inline-flex", alignItems: "center", minHeight: 40, padding: "10px 18px", border: 0, borderRadius: 8, background: "var(--orange, #f54e00)", color: "#fff", fontSize: 14, textDecoration: "none" }}>
-          回到概览
-        </Link>
-      </div>
+        <div className="mt-6 flex justify-center">
+          <Link
+            href="/dashboard"
+            className="inline-flex h-10 items-center justify-center rounded-xl bg-accent px-5 text-sm font-medium text-accent-foreground transition hover:opacity-90"
+          >
+            回到总览
+          </Link>
+        </div>
+      </Card>
     </main>
   );
 }

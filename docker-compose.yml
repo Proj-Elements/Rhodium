@@ -26,10 +26,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      secrets:
+        - heroui_key
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://yueyu:${POSTGRES_PASSWORD:-yueyu_password}@db:5432/yueyu?schema=public
-      NEXT_PUBLIC_APP_NAME: 月余
+      NEXT_PUBLIC_APP_NAME: Rhodium
       PORT: 3030
       HOSTNAME: 0.0.0.0
       TZ: Asia/Shanghai
@@ -50,3 +52,7 @@ services:
 
 volumes:
   yueyu-postgres:
+
+secrets:
+  heroui_key:
+    environment: HEROUI_KEY

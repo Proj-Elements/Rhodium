@@ -33,7 +33,7 @@ export async function GET(request: Request) {
     const monthTxWhere = { deletedAt: null as null, occurredOn: { gte: start, lt: nextStart } };
     // 报销的支出不占预算：支出合计排除它们，报销额与笔数单独聚合。
     const monthExpenseWhere = { ...monthTxWhere, type: TransactionType.EXPENSE };
-    const [budget, expense, reimbursed, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups, categories] = await Promise.all([
+    const [budget, expense, reimbursed, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups, categories, settlement] = await Promise.all([
       resolveBudget(month),
       prisma.transaction.aggregate({
         where: { ...monthExpenseWhere, reimbursedAt: null },
@@ -84,6 +84,7 @@ export async function GET(request: Request) {
       // Categories are a tiny table; loading them here avoids a second
       // sequential round trip once the expense grouping is known.
       prisma.category.findMany({ select: { id: true, name: true } }),
+      prisma.monthlySettlement.findUnique({ where: { month: start } }),
     ]);
 
     const categoryMap = new Map(categories.map((category) => [category.id, category.name]));
@@ -99,9 +100,21 @@ export async function GET(request: Request) {
 
     const focusDateExpenseCents = focusGroups.find((group) => group.type === TransactionType.EXPENSE)?._sum.amountCents ?? 0;
     const focusDateIncomeCents = focusGroups.find((group) => group.type === TransactionType.INCOME)?._sum.amountCents ?? 0;
-    const expenseCents = expense._sum.amountCents ?? 0;
     const reimbursedCents = reimbursed._sum.amountCents ?? 0;
-    const budgetCents = budget.amountCents;
+    const settled = settlement !== null && settlement.reopenedAt === null;
+    const budgetCents = settled
+      ? settlement.remainingAmountCents === null
+        ? null
+        : settlement.budgetAmountCents
+      : budget.amountCents;
+    // Unlike monthly summaries, dashboard expenses are net of reimbursement.
+    const expenseCents = settled
+      ? settlement.remainingAmountCents === null
+        ? settlement.expenseAmountCents - reimbursedCents
+        : settlement.budgetAmountCents - settlement.remainingAmountCents
+      : expense._sum.amountCents ?? 0;
+    const incomeCents = settled ? settlement.incomeAmountCents : income._sum.amountCents ?? 0;
+    const remainingCents = settled ? settlement.remainingAmountCents : calculateRemaining(budgetCents, expenseCents);
     return NextResponse.json({
       month,
       today,
@@ -112,8 +125,8 @@ export async function GET(request: Request) {
       outOfPocketCents: expenseCents,
       reimbursedCents,
       reimbursedCount: reimbursed._count._all,
-      incomeCents: income._sum.amountCents ?? 0,
-      remainingCents: calculateRemaining(budgetCents, expenseCents),
+      incomeCents,
+      remainingCents,
       usagePercent: calculateUsage(budgetCents, expenseCents),
       focusDateExpenseCents,
       focusDateIncomeCents,

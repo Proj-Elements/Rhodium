@@ -2,6 +2,7 @@ export type CategoryDTO = {
   id: string;
   name: string;
   type: "EXPENSE" | "INCOME" | "BOTH";
+  icon: string | null;
   isSystem: boolean;
   sortOrder: number;
   archivedAt: string | null;

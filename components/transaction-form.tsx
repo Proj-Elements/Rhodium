@@ -1,10 +1,13 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Button, Input, Radio, RadioGroup, TextArea } from "@heroui/react";
+import { Segment } from "@heroui-pro/react";
 import { apiFetch, errorMessage } from "@/lib/api-client";
-import { todayInShanghai } from "@/lib/domain";
+import { preferredEntryDate, rememberEntryDate } from "@/lib/entry-preferences";
 import { CategoryDTO, TransactionDTO } from "@/lib/types";
-import { Icon } from "@/components/icon";
+import { CategoryIcon, Icon } from "@/components/icon";
+import { IconButton } from "@/components/icon-button";
 import { ModalDialog } from "@/components/modal-dialog";
 
 type TransactionFormProps = {
@@ -15,22 +18,23 @@ type TransactionFormProps = {
   onSaved: () => void;
 };
 
-function preferredDate() {
-  if (typeof window !== "undefined" && window.localStorage.getItem("yueyu-entry-date-mode") === "last") {
-    return window.localStorage.getItem("yueyu-last-entry-date") || todayInShanghai();
-  }
-  return todayInShanghai();
-}
-
 export function TransactionForm({ categories, transaction, defaultDate, onClose, onSaved }: TransactionFormProps) {
   const [type, setType] = useState<"expense" | "income">(transaction?.type === "INCOME" ? "income" : "expense");
   const [amount, setAmount] = useState(transaction ? (transaction.amountCents / 100).toFixed(2) : "");
-  const [occurredOn, setOccurredOn] = useState(transaction?.occurredOn || defaultDate || preferredDate());
+  const [occurredOn, setOccurredOn] = useState(() => transaction?.occurredOn || preferredEntryDate(defaultDate));
   const [categoryId, setCategoryId] = useState(transaction?.category.id || "");
   const [note, setNote] = useState(transaction?.note || "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const availableCategories = useMemo(() => categories.filter((category) => !category.archivedAt && (category.type === "BOTH" || category.type === (type === "expense" ? "EXPENSE" : "INCOME"))), [categories, type]);
+  const errorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ block: "nearest" });
+  }, [error]);
+
+  const availableCategories = useMemo(() => categories.filter((category) =>
+    !category.archivedAt && (category.type === "BOTH" || category.type === (type === "expense" ? "EXPENSE" : "INCOME")),
+  ), [categories, type]);
 
   useEffect(() => {
     if (!categoryId && availableCategories.length === 1) setCategoryId(availableCategories[0].id);
@@ -38,12 +42,13 @@ export function TransactionForm({ categories, transaction, defaultDate, onClose,
 
   function switchType(next: "expense" | "income") {
     setType(next);
-    const nextAvailable = categories.filter((category) => !category.archivedAt && (category.type === "BOTH" || category.type === (next === "expense" ? "EXPENSE" : "INCOME")));
-    if (!nextAvailable.some((category) => category.id === categoryId)) setCategoryId("");
+    const available = categories.filter((category) => !category.archivedAt && (category.type === "BOTH" || category.type === (next === "expense" ? "EXPENSE" : "INCOME")));
+    if (!available.some((category) => category.id === categoryId)) setCategoryId("");
   }
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    if (saving) return;
     setError("");
     setSaving(true);
     try {
@@ -51,7 +56,7 @@ export function TransactionForm({ categories, transaction, defaultDate, onClose,
         method: transaction ? "PATCH" : "POST",
         json: { type, amount, occurredOn, categoryId, note },
       });
-      window.localStorage.setItem("yueyu-last-entry-date", occurredOn);
+      rememberEntryDate(occurredOn);
       onSaved();
     } catch (saveError) {
       setError(errorMessage(saveError, "保存失败，请稍后再试"));
@@ -60,13 +65,46 @@ export function TransactionForm({ categories, transaction, defaultDate, onClose,
     }
   }
 
-  return <ModalDialog labelledBy="transaction-form-title" dismissable={!saving} onClose={onClose} onSubmit={submit}>
-    <div className="modal-head"><div><p className="eyebrow">QUICK ENTRY</p><h2 id="transaction-form-title">{transaction ? "编辑这笔账" : "记一笔"}</h2><p className="modal-subtitle">金额会以人民币分为单位保存，避免小数误差。</p></div><button className="modal-close" type="button" onClick={onClose} aria-label="关闭"><Icon name="close" /></button></div>
-    <div className="type-switch" role="tablist" aria-label="记录类型"><button type="button" role="tab" aria-selected={type === "expense"} className={type === "expense" ? "active" : ""} onClick={() => switchType("expense")}><Icon name="expense" size={14} />支出</button><button type="button" role="tab" aria-selected={type === "income"} className={type === "income" ? "active income-active" : ""} onClick={() => switchType("income")}><Icon name="income" size={14} />收入</button></div>
-    <div className="form-field"><label className="form-label" htmlFor="amount">金额（元）</label><div className="amount-field"><span>¥</span><input id="amount" className="form-control amount-input" inputMode="decimal" placeholder="0.00" value={amount} onChange={(event) => setAmount(event.target.value)} autoFocus required /></div></div>
-    <div className="form-row"><div className="form-field"><label className="form-label" htmlFor="occurredOn">发生日期</label><input id="occurredOn" className="form-control" type="date" value={occurredOn} onChange={(event) => setOccurredOn(event.target.value)} required /></div><div className="form-field"><label className="form-label" htmlFor="categoryId">分类</label><select id="categoryId" className="form-control" value={categoryId} onChange={(event) => setCategoryId(event.target.value)} required><option value="">请选择分类</option>{availableCategories.map((category) => <option value={category.id} key={category.id}>{category.name}</option>)}</select>{availableCategories.length === 0 && <small className="field-hint">没有可用分类，请先到设置中添加。</small>}</div></div>
-    <div className="form-field"><label className="form-label" htmlFor="note">备注 <span className="label-optional">可选</span></label><textarea id="note" className="form-control" maxLength={200} placeholder={type === "expense" ? "例如：早饭、打印资料" : "例如：周末兼职"} value={note} onChange={(event) => setNote(event.target.value)} /><div className="character-count">{note.length} / 200</div></div>
-    {error && <p className="form-error" role="alert">{error}</p>}
-    <div className="modal-actions"><button type="button" className="button button-secondary" onClick={onClose}>取消</button><button type="submit" className="button button-primary" disabled={saving || availableCategories.length === 0}>{saving ? "保存中…" : transaction ? "保存修改" : "保存记录"}</button></div>
-  </ModalDialog>;
+  return (
+    <ModalDialog
+      labelledBy="transaction-form-title"
+      dismissable={!saving}
+      wide
+      onClose={onClose}
+      onSubmit={submit}
+      header={
+        <div className="flex items-start justify-between gap-4">
+          <div><p className="mb-1 text-[11px] text-muted">记录生活的一个切片</p><h2 id="transaction-form-title" className="text-xl font-semibold tracking-tight">{transaction ? "编辑这笔记录" : "记一笔"}</h2></div>
+          <IconButton icon="close" label="关闭记账表单" size="sm" onPress={onClose} isDisabled={saving} />
+        </div>
+      }
+      footer={<>
+        <Button type="button" variant="ghost" onPress={onClose} isDisabled={saving}>取消</Button>
+        <Button type="submit" isPending={saving} isDisabled={!categoryId || !amount.trim()}>{transaction ? "保存修改" : "保存记录"}</Button>
+      </>}
+    >
+
+      <Segment aria-label="记录类型" selectedKey={type} isDisabled={saving} onSelectionChange={(key) => { if (key === "expense" || key === "income") switchType(key); }} className="w-fit">
+        <Segment.Item id="expense" className="gap-2 px-5 text-xs"><Icon name="expense" size={14} />支出</Segment.Item>
+        <Segment.Item id="income" className="gap-2 px-5 text-xs"><Icon name="income" size={14} />收入</Segment.Item>
+      </Segment>
+
+      <div>
+        <label className="field-label text-muted" htmlFor="amount">{type === "expense" ? "支出金额" : "收入金额"}</label>
+        <div className="form-amount"><span className="text-2xl text-muted">¥</span><input id="amount" inputMode="decimal" placeholder="0.00" value={amount} onChange={(event) => setAmount(event.target.value)} autoFocus required disabled={saving} /></div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <span className="field-label" id="entry-category-label">选择分类</span>
+        <RadioGroup aria-labelledby="entry-category-label" name="categoryId" value={categoryId} onChange={setCategoryId} isRequired isDisabled={saving} className="category-grid grid min-w-0 grid-cols-4 gap-1.5 sm:grid-cols-5">
+          {availableCategories.map((category) => <Radio key={category.id} value={category.id} className="min-w-0 w-full"><Radio.Content className="category-choice w-full"><CategoryIcon categoryName={category.name} type={type === "income" ? "INCOME" : "EXPENSE"} icon={category.icon} size={20} /><span>{category.name}</span></Radio.Content></Radio>)}
+        </RadioGroup>
+        {!availableCategories.length && <p className="text-xs text-warning">没有可用分类，请先到设置中添加。</p>}
+      </div>
+
+      <div className="flex flex-col gap-2"><label className="field-label" htmlFor="occurredOn">发生日期</label><Input id="occurredOn" className="ledger-field tabular-nums" type="date" value={occurredOn} onChange={(event) => setOccurredOn(event.target.value)} required disabled={saving} /></div>
+      <div className="flex flex-col gap-2"><label className="field-label" htmlFor="note">备注 <span className="font-normal text-muted">· 可选</span></label><TextArea id="note" className="ledger-field" rows={2} maxLength={200} placeholder={type === "expense" ? "这笔花销，是生活里的什么小事？" : "记下这份收入的来源"} value={note} onChange={(event) => setNote(event.target.value)} disabled={saving} /></div>
+      {error && <Alert ref={errorRef} status="danger"><Alert.Indicator /><Alert.Content><Alert.Title>{error}</Alert.Title></Alert.Content></Alert>}
+    </ModalDialog>
+  );
 }

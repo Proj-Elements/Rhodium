@@ -2,57 +2,42 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { Button, Tooltip } from "@heroui/react";
+import { AppLayout, Sidebar } from "@heroui-pro/react";
 import { Icon } from "@/components/icon";
-import { ColorModeToggle } from "@/components/color-mode-toggle";
+import { IconButton } from "@/components/icon-button";
 import { requestNewTransaction } from "@/lib/new-transaction-intent";
 import { nextColorMode } from "@/lib/theme";
 import { useColorMode } from "@/lib/use-color-mode";
+import { useToday } from "@/lib/use-today";
 
-type NavItem = { href: string; label: string; description: string; icon: "grid" | "receipt" | "repeat" | "calendar" | "settings" };
+const navItems = [
+  { href: "/dashboard", label: "财务总览", icon: "grid" },
+  { href: "/transactions", label: "收支明细", icon: "receipt" },
+  { href: "/subscriptions", label: "固定支出", icon: "repeat" },
+  { href: "/settlements", label: "月度回顾", icon: "calendar" },
+] as const;
 
-const navItems: NavItem[] = [
-  { href: "/dashboard", label: "概览", description: "本月状态", icon: "grid" },
-  { href: "/transactions", label: "账目", description: "逐笔记录", icon: "receipt" },
-  { href: "/subscriptions", label: "固定支出", description: "自动记账", icon: "repeat" },
-  { href: "/settlements", label: "月度回顾", description: "结算与趋势", icon: "calendar" },
-];
+const colorModeLabels = { system: "跟随系统", light: "亮色", dark: "暗色" } as const;
 
-const secondaryItems: NavItem[] = [{ href: "/settings", label: "设置", description: "分类与数据", icon: "settings" }];
-
-const titles: Record<string, { eyebrow: string; title: string; description: string }> = {
-  "/dashboard": { eyebrow: "MONTHLY OVERVIEW", title: "把这个月，过得有数。", description: "记录日常的小额选择，也看见预算还剩下多少空间。" },
-  "/transactions": { eyebrow: "LEDGER", title: "每一笔，都有出处。", description: "按日期回看你的日常花销，也可以随时补记或修正。" },
-  "/subscriptions": { eyebrow: "RECURRING", title: "固定的支出，交给月余记得。", description: "让每月都会发生的费用自动出现，少一点遗忘，多一点确定。" },
-  "/settlements": { eyebrow: "MONTHLY REVIEW", title: "这个月，留下些什么？", description: "用一次月末回顾，把花销变成下一月更好的参考。" },
-  "/settings": { eyebrow: "SETTINGS", title: "把账本调成你的样子。", description: "管理分类、导入旧账，或把数据完整地带走。" },
+const pages: Record<string, { label: string; title: string; description: string }> = {
+  "/dashboard": { label: "财务总览", title: "把日子，过得有余。", description: "看清每一笔来去，从容安排接下来的生活。" },
+  "/transactions": { label: "收支明细", title: "每一笔，都有迹可循。", description: "日常的小小记录，是留给生活的清晰注脚。" },
+  "/subscriptions": { label: "固定支出", title: "固定的事，不必惦记。", description: "管理每月如期而至的支出，让记账自然发生。" },
+  "/settlements": { label: "月度回顾", title: "回望一个月，看见新可能。", description: "把生活的轨迹整理好，再轻装走向下个月。" },
+  "/settings": { label: "账本设置", title: "你的账本，你的节奏。", description: "设定预算与习惯，让 Rhodium 更懂你的日常。" },
 };
 
-/**
- * The sidebar indicator pings the sync on every AppShell mount. Server-side
- * syncs are cooldown-cached, so the extra POST is cheap; caching the ping at
- * module scope (one per browser session) instead used to keep the badge stuck
- * on "已同步" long after every later sync had started failing.
- */
-
-function NavLink({ item, active }: { item: NavItem; active: boolean }) {
-  return <Link href={item.href} className={`nav-item${active ? " active" : ""}`}>
-    <span className="nav-icon"><Icon name={item.icon} size={17} /></span>
-    <span className="nav-copy"><strong>{item.label}</strong><small>{item.description}</small></span>
-    {active && <span className="nav-dot" />}
-  </Link>;
-}
-
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({ children, actions }: { children: ReactNode; actions?: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const page = titles[pathname] || titles["/dashboard"];
+  const page = pages[pathname] || pages["/dashboard"];
+  const today = useToday();
   const [syncState, setSyncState] = useState<"syncing" | "ready" | "error">("syncing");
-  const { mode, setMode: setColorMode, hydrated: themeHydrated, systemDark } = useColorMode();
+  const { mode, setMode, hydrated, systemDark } = useColorMode();
+  const nextMode = nextColorMode(mode, systemDark);
 
-  // Was a <Link href="/transactions?new=1">, which did nothing when the user was
-  // already on /transactions: same-route navigation does not remount the page.
   function openNewTransaction() {
     requestNewTransaction();
     if (pathname !== "/transactions") router.push("/transactions");
@@ -61,68 +46,81 @@ export function AppShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
     fetch("/api/subscriptions/sync", { method: "POST" })
-      .then((response) => { if (!response.ok) throw new Error("sync failed"); if (mounted) setSyncState("ready"); })
+      .then((response) => {
+        if (!response.ok) throw new Error("sync failed");
+        if (mounted) setSyncState("ready");
+      })
       .catch(() => { if (mounted) setSyncState("error"); });
     return () => { mounted = false; };
   }, []);
 
-  const syncLabel = syncState === "syncing" ? "正在同步固定支出" : syncState === "error" ? "同步稍后重试" : "固定支出已同步";
+  const sidebarContent = (
+    <>
+      <Sidebar.Header className="px-5 pb-7 pt-8">
+        <Link href="/dashboard" aria-label="Rhodium，回到财务总览" className="flex w-fit items-center gap-3 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-focus">
+          <span className="brand-mark" aria-hidden="true"><svg viewBox="0 0 64 64" fill="none"><path d="M22 46V18h12a9 9 0 0 1 0 18H22m12 0 10 10" stroke="currentColor" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" /></svg></span>
+          <span><b className="block text-[21px] font-semibold tracking-[-0.04em]">Rhodium</b><small className="block text-[10px] tracking-[0.03em] text-muted">A little more to life.</small></span>
+        </Link>
+      </Sidebar.Header>
+      <Sidebar.Content className="gap-5 px-4">
+        <Sidebar.Group>
+          <Sidebar.GroupLabel className="mb-3 px-3 text-[10px]">日常与计划</Sidebar.GroupLabel>
+          <Sidebar.Menu aria-label="主导航" showGuideLines={false}>
+            {navItems.map((item) => (
+              <Sidebar.MenuItem key={item.href} id={item.href} href={item.href} isCurrent={pathname === item.href} textValue={item.label}>
+                <Sidebar.MenuIcon><Icon name={item.icon} size={18} /></Sidebar.MenuIcon>
+                <Sidebar.MenuLabel>{item.label}</Sidebar.MenuLabel>
+                {pathname === item.href && <span className="ml-auto size-1.5 rounded-full bg-accent" aria-hidden="true" />}
+              </Sidebar.MenuItem>
+            ))}
+          </Sidebar.Menu>
+        </Sidebar.Group>
+      </Sidebar.Content>
+      <Sidebar.Footer className="shrink-0 px-4 pb-6 pt-6">
+        <Sidebar.Group>
+          <Sidebar.GroupLabel className="mb-3 px-3 text-[10px]">管理与偏好</Sidebar.GroupLabel>
+          <Sidebar.Menu aria-label="账本管理" showGuideLines={false}>
+            <Sidebar.MenuItem id="/settings" href="/settings" isCurrent={pathname === "/settings"} textValue="账本设置">
+              <Sidebar.MenuIcon><Icon name="settings" size={18} /></Sidebar.MenuIcon><Sidebar.MenuLabel>账本设置</Sidebar.MenuLabel>
+              {pathname === "/settings" && <span className="ml-auto size-1.5 rounded-full bg-accent" aria-hidden="true" />}
+            </Sidebar.MenuItem>
+          </Sidebar.Menu>
+        </Sidebar.Group>
+      </Sidebar.Footer>
+    </>
+  );
 
-  return <div className="app-frame">
-    <aside className="sidebar">
-      <Link href="/dashboard" className="brand-lockup" aria-label="回到月余概览">
-        <span className="brand-mark"><span>月</span></span>
-        <span className="brand-copy"><b>月余</b><small>PERSONAL LEDGER</small></span>
-      </Link>
-      <div className="sidebar-rule" />
-      <nav className="side-nav" aria-label="主导航">
-        <p className="nav-label">账本空间</p>
-        {navItems.map((item) => <NavLink key={item.href} item={item} active={pathname === item.href} />)}
-        <p className="nav-label secondary-label">工具</p>
-        {secondaryItems.map((item) => <NavLink key={item.href} item={item} active={pathname === item.href} />)}
-      </nav>
-      <div className="sidebar-spacer" />
-      <div className="theme-toggle-row">
-        <ColorModeToggle mode={mode} onChange={setColorMode} hydrated={themeHydrated} />
-      </div>
-      <div className="sync-status"><span className={`sync-dot ${syncState}`} />{syncLabel}</div>
-      <div className="sidebar-footer">CNY · ASIA/SHANGHAI</div>
-    </aside>
-    <main className="main-content">
-      {/* Mobile chrome stays mounted and is shown/hidden purely by the
-          (max-width: 900px) media query in globals.css. Gating it on a
-          matchMedia state instead made narrow viewports render the desktop
-          header on the first paint, then swap in the mobile bars. */}
-      <div className="mobile-topbar">
-        <Link href="/dashboard" className="mobile-brand"><span className="brand-mark"><span>月</span></span><strong>月余</strong></Link>
-        <div className="mobile-topbar-actions">
-          <button
-            type="button"
-            className="icon-button theme-cycle-button"
-            aria-label={`颜色模式：${mode === "system" ? "跟随系统" : mode === "light" ? "亮色" : "暗色"}（点按切换）`}
-            disabled={!themeHydrated}
-            onClick={() => setColorMode(nextColorMode(mode, systemDark))}
-          >
-            <Icon name={mode === "system" ? "monitor" : mode === "light" ? "sun" : "moon"} size={16} />
-          </button>
-          {/* A plain Link to ?new=1 is a no-op when /transactions is already
-              open (same-route navigation does not remount), so trigger the
-              intent through the shared event instead. */}
-          <button type="button" onClick={openNewTransaction} className="button button-primary button-small"><Icon name="plus" size={15} />记一笔</button>
+  const dateLabel = today ? new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long", timeZone: "Asia/Shanghai" }).format(new Date(`${today}T00:00:00+08:00`)) : "";
+
+  return (
+    <AppLayout
+      className="ledger-shell"
+      navigate={(href) => router.push(href)}
+      sidebarCollapsible="none"
+      sidebarVariant="sidebar"
+      sidebar={<><Sidebar className="ledger-sidebar">{sidebarContent}</Sidebar><Sidebar.Mobile className="ledger-sidebar">{sidebarContent}</Sidebar.Mobile></>}
+      navbar={
+        <div className="ledger-topbar">
+          <div className="flex min-w-0 items-center gap-3 text-xs">
+            <Tooltip delay={350}><AppLayout.MenuToggle aria-label="打开导航" variant="ghost" /><Tooltip.Content>打开导航</Tooltip.Content></Tooltip>
+            <span className="hidden text-muted sm:inline">我的账本</span><span className="hidden text-muted/50 sm:inline" aria-hidden="true">/</span><span className="font-medium">{page.label}</span>
+          </div>
+          <div className="flex shrink-0 items-center gap-4">
+            <span className="hidden text-[11px] tabular-nums text-muted sm:block">{dateLabel}</span>
+            <IconButton icon={mode === "system" ? "monitor" : mode === "light" ? "sun" : "moon"} label={`颜色模式：${colorModeLabels[mode]}，切换为${colorModeLabels[nextMode]}`} size="sm" isDisabled={!hydrated} onPress={() => setMode(nextMode)} />
+          </div>
         </div>
+      }
+    >
+      <a href="#ledger-content" className="sr-only z-50 rounded-xl bg-overlay px-4 py-3 focus:not-sr-only focus:fixed focus:left-4 focus:top-4">跳到主要内容</a>
+      <div className="ledger-main">
+        <header className="page-heading reveal">
+          <div><h1 className="page-title outline-none" id="ledger-content" tabIndex={-1}>{page.title}</h1><p className="page-description">{page.description}</p></div>
+          <div className="page-actions">{actions !== undefined ? actions : <Button variant="primary" onPress={openNewTransaction}><Icon name="plus" size={16} />记一笔</Button>}</div>
+        </header>
+        {syncState === "error" && <p role="status" className="mb-5 text-xs text-warning">固定支出同步失败，请刷新重试。</p>}
+        {children}
       </div>
-      <nav className="mobile-nav" aria-label="移动端导航">
-        {[...navItems, ...secondaryItems].map((item) => <Link href={item.href} key={item.href} className={pathname === item.href ? "active" : ""}><Icon name={item.icon} size={18} /><span>{item.label}</span></Link>)}
-      </nav>
-      <header className="page-header">
-        <div className="page-header-copy">
-          <p className="eyebrow">{page.eyebrow}</p>
-          <h1>{page.title}</h1>
-          <p className="page-description">{page.description}</p>
-        </div>
-        <button type="button" onClick={openNewTransaction} className="button button-primary page-cta"><Icon name="plus" size={17} />记一笔</button>
-      </header>
-      <div className="page-content">{children}</div>
-    </main>
-  </div>;
+    </AppLayout>
+  );
 }

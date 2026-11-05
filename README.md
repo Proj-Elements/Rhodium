@@ -1,6 +1,10 @@
-# 月余
+# Rhodium
 
 面向大学生的个人记账 Web 应用：记录日常支出、设置月度预算、管理固定订阅、一键报销，并在月底回顾本月余量。
+
+前端采用 HeroUI v3 / HeroUI Pro 的暖白与松绿主题，支持移动端和亮暗模式。设计说明、隔离验收方法与已知依赖风险见 [`docs/frontend-redesign.md`](docs/frontend-redesign.md)。
+
+产品显示名称为 Rhodium。数据库、Docker 数据卷和浏览器偏好的旧标识保持不变，改名不会创建新账本或清空已有设置。
 
 ## 本地开发
 
@@ -20,6 +24,8 @@ npm run dev
 ```bash
 docker compose up -d --build
 ```
+
+当前界面使用 HeroUI Pro 组件。Docker 构建前需在当前 shell 设置 `HEROUI_KEY`（从 HeroUI Pro 获取），不要把它写进仓库或 `.env`。Compose 会通过 BuildKit secret 将其仅传给固定版本的 `hpsetup@4.7.4`；密钥不作为构建参数或镜像环境变量保存。不要提交或发送 key。本地首次 `npm ci` 后也需运行 `npx -y hpsetup@4.7.4 react --auto`，密钥同样通过环境变量提供。
 
 应用容器会在启动时自动执行 Prisma migrations。PostgreSQL 数据保存在 `yueyu-postgres` named volume 中。健康检查探针为 `GET /api/health`。
 
@@ -61,8 +67,8 @@ POSTGRES_PASSWORD='强口令' APP_BIND=0.0.0.0 docker compose up -d --build
 应用自带一份可一键安装的 Agent 技能包，安装后 ZCode 等支持 skills 的 Agent 能直接通过 API 查看和管理账本（查当月开支、记一笔、预算、结算、订阅、导入导出）。技能文件随应用分发，由应用自身在 `/skill/SKILL.md` 提供：
 
 ```bash
-mkdir -p ~/.agents/skills/yueyu-ledger
-curl -fsSL http://127.0.0.1:3030/skill/SKILL.md -o ~/.agents/skills/yueyu-ledger/SKILL.md
+mkdir -p ~/.agents/skills/rhodium-ledger
+curl -fsSL http://127.0.0.1:3030/skill/SKILL.md -o ~/.agents/skills/rhodium-ledger/SKILL.md
 ```
 
 安装后重启 Agent 会话即可生效。技能源文件在仓库的 `public/skill/SKILL.md`，应用升级时随版本更新，重新执行上面的命令即可刷新。
