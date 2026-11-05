@@ -86,13 +86,15 @@ npm run build
 需要数据库的集成测试（预算继承、结算快照、订阅同步、接口回归）单独运行，先准备一个**可以被清空**的库：
 
 ```bash
-docker run -d --name yueyu-test-db -e POSTGRES_USER=yueyu -e POSTGRES_PASSWORD=testpw -e POSTGRES_DB=yueyu_test -p 55433:5432 postgres:16-alpine
+docker run -d --name yueyu-test-db -e POSTGRES_USER=yueyu -e POSTGRES_PASSWORD=testpw -e POSTGRES_DB=yueyu_test -p 127.0.0.1:55433:5432 postgres:16-alpine
+# 等待 pg_isready 成功；仅为上面刚创建的空测试库设置允许清空标记。
+docker exec yueyu-test-db psql -U yueyu -d yueyu_test -c "COMMENT ON DATABASE yueyu_test IS 'rhodium:test-database';"
 export TEST_DATABASE_URL="postgresql://yueyu:testpw@127.0.0.1:55433/yueyu_test?schema=public"
 DATABASE_URL="$TEST_DATABASE_URL" npx prisma migrate deploy
-npm run test:db
+npm run test:db -- tests/integration/budget.test.ts
 ```
 
-集成测试会 `TRUNCATE` 所有表，**不要指向真实数据库**。
+集成测试会 `TRUNCATE` 所有业务表，**不要指向真实数据库**。必须显式设置 `TEST_DATABASE_URL`，不再回退到普通 `DATABASE_URL`；仅接受回环地址、`public` schema 和以 `_test` / `_test_<标识>` 结尾的库名。每次清空前还会核对实际数据库、用户、schema 及上述数据库注释标记。不要为了运行测试给真实账本添加此标记。日常修复只指定受影响测试文件，不重复执行全量测试。
 
 以上全部命令都由 `.github/workflows/ci.yml` 在每次 push 与 pull request 上跑一遍，集成测试在 CI 里使用一次性的 postgres service 容器。
 
