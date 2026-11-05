@@ -41,3 +41,10 @@ test("schema and tooling changes select explicit accounting contracts", () => {
   assert.ok(tooling.sources.includes("lib/summary.test.ts"));
   assert.ok(!tooling.sources.includes("lib/csv.test.ts"));
 });
+test("shared ledger locks and destructive-test guards require their database dependents", () => {
+  for (const path of ["lib/ledger-write.ts", "lib/test-database.ts"]) {
+    const scope = scopeFor([path]);
+    assert.equal(scope.database, true, path);
+    assert.ok(scope.dbSources.includes(path));
+  }
+});

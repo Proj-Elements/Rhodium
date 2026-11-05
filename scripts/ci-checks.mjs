@@ -31,7 +31,7 @@ export function scopeFor(paths, present = () => true) {
   return {
     sources: [...new Set([...sources, ...seeds])],
     dbSources: [...new Set([...sources, ...dbSeeds])],
-    database: schema || tooling || paths.some((path) => /^(?:app\/api\/|tests\/integration\/|lib\/(?:api|budget|domain|errors|import-parser|prisma|rate-limit|seed|serializers|subscription-planner|subscription-serializer|subscriptions|summary|transactions|validation)\.)/.test(path)),
+    database: schema || tooling || paths.some((path) => /^(?:app\/api\/|tests\/integration\/|lib\/(?:api|budget|domain|errors|import-parser|ledger-write|prisma|rate-limit|seed|serializers|subscription-planner|subscription-serializer|subscriptions|summary|test-database|transactions|validation)\.)/.test(path)),
     typecheck: tooling || schema || sources.some((path) => /\.tsx?$/.test(path)),
     build: tooling || schema || paths.some((path) => /^(?:app|components)\//.test(path)),
     lint: paths.filter((path) => /\.(?:[cm]?js|tsx?)$/.test(path) && present(path)),
