@@ -1,9 +1,11 @@
 node_modules
 .next
+.next-*/
 out
 .env
 .env.local
 coverage
+.vitest/
 *.log
 
 # OS / editor junk
@@ -20,3 +22,4 @@ Docker/*.tar.gz
 # Local agent tool configs
 .claude/
 .freebuff/
+vercel.json

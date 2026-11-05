@@ -1,5 +1,6 @@
 "use client";
 
+import { Segment } from "@heroui-pro/react";
 import { Icon } from "@/components/icon";
 import type { ColorMode } from "@/lib/theme";
 
@@ -11,26 +12,41 @@ const options: Array<{ value: ColorMode; label: string; icon: "monitor" | "sun" 
 
 /**
  * Three-way segmented control (跟随系统 / 亮 / 暗). Renders as a disabled
- * skeleton until hydration so SSR markup matches the client's first paint.
+ * control until hydration so SSR markup matches the client's first paint.
  */
-export function ColorModeToggle({ mode, onChange, hydrated }: { mode: ColorMode; onChange: (mode: ColorMode) => void; hydrated: boolean }) {
+export function ColorModeToggle({
+  mode,
+  onChange,
+  hydrated,
+}: {
+  mode: ColorMode;
+  onChange: (mode: ColorMode) => void;
+  hydrated: boolean;
+}) {
   return (
-    <div className="color-mode-toggle" role="radiogroup" aria-label="颜色模式">
+    <Segment
+      aria-label="颜色模式"
+      size="sm"
+      selectedKey={mode}
+      isDisabled={!hydrated}
+      onSelectionChange={(key) => {
+        if (key === "system" || key === "light" || key === "dark") {
+          onChange(key);
+        }
+      }}
+      className="w-full"
+    >
       {options.map((option) => (
-        <button
+        <Segment.Item
           key={option.value}
-          type="button"
-          role="radio"
-          aria-checked={mode === option.value}
-          disabled={!hydrated}
-          className={mode === option.value ? "active" : ""}
-          onClick={() => onChange(option.value)}
-          title={option.label}
+          id={option.value}
           aria-label={option.label}
+          className="flex-1 justify-center gap-1.5 text-xs"
         >
-          <span className="color-mode-icon"><Icon name={option.icon} size={15} /></span>
-        </button>
+          <Icon name={option.icon} size={14} />
+          <span>{option.value === "system" ? "自动" : option.label}</span>
+        </Segment.Item>
       ))}
-    </div>
+    </Segment>
   );
 }

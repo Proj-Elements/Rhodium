@@ -1,23 +1,34 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Button } from "@heroui/react";
+import { Icon } from "@/components/icon";
 
 /**
- * Shared toast pill. Extracted from five page-local copies.
+ * Shared floating status pill, centered in the content column.
  */
 export function Toast({ message, action, onAction }: { message: string; action?: string; onAction?: () => void }) {
   return (
-    <div className="undo-toast" role="status" aria-live="polite">
+    <div
+      className="ledger-toast flex items-center gap-3 rounded-2xl bg-overlay px-4 py-3 text-xs text-overlay-foreground shadow-overlay"
+      role="status"
+      aria-live="polite"
+    >
+      <span className="shrink-0 text-muted">
+        <Icon name="info" size={16} />
+      </span>
       <span>{message}</span>
-      {action && onAction && <button type="button" onClick={onAction}>{action}</button>}
+      {action && onAction && (
+        <Button size="sm" variant="tertiary" className="h-7 px-2.5 text-xs" onPress={onAction}>
+          {action}
+        </Button>
+      )}
     </div>
   );
 }
 
 /**
- * Timed message with guaranteed timer cleanup: re-showing a message cancels
- * the previous timer (the old page-local versions let the first timer cut a
- * second message short), and unmount always clears it.
+ * Timed message with guaranteed timer cleanup.
  */
 export function useFlash(durationMs = 2600) {
   const [message, setMessage] = useState("");
@@ -32,9 +43,12 @@ export function useFlash(durationMs = 2600) {
     [durationMs],
   );
 
-  useEffect(() => () => {
-    if (timer.current) window.clearTimeout(timer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (timer.current) window.clearTimeout(timer.current);
+    },
+    [],
+  );
 
   return { message, flash, clear: useCallback(() => setMessage(""), []) };
 }
