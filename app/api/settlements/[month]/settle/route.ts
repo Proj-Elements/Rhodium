@@ -42,7 +42,7 @@ export async function POST(_request: Request, { params }: Context) {
           settledAt: new Date(),
           reopenedAt: null,
         },
-    });
+      });
     });
     return NextResponse.json({
       settlement: {

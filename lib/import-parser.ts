@@ -33,17 +33,17 @@ export function parseAmountToCents(input: unknown, label = "金额"): number {
   return moneyToCents(text(input, label).replace(/,/g, ""));
 }
 
-/** Integer-cents parser for backup payloads (amountCents fields). */
-export function parseCents(input: unknown, label: string): number {
+/** Parse integer cents; aggregates may use the full database Int range. */
+export function parseCents(input: unknown, label: string, maximum = 2_000_000_000): number {
   if (input === null || input === undefined || input === "") throw new Error(`${label}不能为空`);
   const numeric = typeof input === "number" ? input : Number(String(input).replace(/,/g, "").trim());
-  if (!Number.isInteger(numeric) || numeric < 0 || numeric > 2_000_000_000) throw new Error(`${label}格式不正确`);
+  if (!Number.isInteger(numeric) || numeric < 0 || numeric > maximum) throw new Error(`${label}格式不正确`);
   return numeric;
 }
 
-export function parseSignedCents(input: unknown, label: string): number {
+export function parseSignedCents(input: unknown, label: string, minimum = -2_000_000_000, maximum = 2_000_000_000): number {
   const numeric = typeof input === "number" ? input : Number(String(input ?? "").replace(/,/g, "").trim());
-  if (!Number.isInteger(numeric) || Math.abs(numeric) > 2_000_000_000) throw new Error(`${label}格式不正确`);
+  if (!Number.isInteger(numeric) || numeric < minimum || numeric > maximum) throw new Error(`${label}格式不正确`);
   return numeric;
 }
 

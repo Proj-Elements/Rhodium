@@ -55,6 +55,13 @@ describe("saveMonthlyBudget", () => {
     await saveMonthlyBudget(MONTH, 0);
     expect(await resolveBudget(MONTH)).toEqual({ amountCents: 0, source: "month" });
   });
+
+  it("does not let the shared helper rewrite a settled budget", async () => {
+    await saveMonthlyBudget(MONTH, 1000);
+    await settleMonth(new Request(`http://localhost/api/settlements/${MONTH}/settle`, { method: "POST" }), routeContext({ month: MONTH }));
+    await expect(saveMonthlyBudget(MONTH, 2000)).rejects.toThrow("已经结算");
+    expect(await resolveBudget(MONTH)).toEqual({ amountCents: 1000, source: "month" });
+  });
 });
 
 describe("getMonthSummary", () => {

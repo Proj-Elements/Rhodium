@@ -66,8 +66,8 @@ export async function PATCH(request: Request, { params }: Context) {
         where: { id },
         data: { ...transactionData(parsed), reimbursedAt: null },
         include: transactionInclude,
-    });
-    return NextResponse.json({ transaction: serializeTransaction(transaction) });
+      });
+      return NextResponse.json({ transaction: serializeTransaction(transaction) });
     });
   } catch (error) {
     return handleApiError(error);
@@ -85,8 +85,8 @@ export async function DELETE(_request: Request, { params }: Context) {
       const transaction = await tx.transaction.update({
         where: { id },
         data: { deletedAt: new Date() },
-    });
-    return NextResponse.json({ id: transaction.id, deleted: true });
+      });
+      return NextResponse.json({ id: transaction.id, deleted: true });
     });
   } catch (error) {
     return handleApiError(error);

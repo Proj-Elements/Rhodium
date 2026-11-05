@@ -25,8 +25,8 @@ export async function PATCH(request: Request, { params }: Context) {
           ...(body.icon !== undefined ? { icon: body.icon } : {}),
           ...(typeof body.archived === "boolean" ? { archivedAt: body.archived ? new Date() : null } : {}),
         },
-    });
-    return NextResponse.json({ category: serializeCategory(updated) });
+      });
+      return NextResponse.json({ category: serializeCategory(updated) });
     });
     invalidateSubscriptionSyncCache();
     return response;

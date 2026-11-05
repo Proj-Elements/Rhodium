@@ -60,6 +60,14 @@ describe("lossless JSON backup restore", () => {
     expect(await prisma.category.findUnique({ where: { name_type: { name: "餐饮", type: "EXPENSE" } } })).toMatchObject({ archivedAt });
   });
 
+  it("restores category ordering even when seeding creates the category first", async () => {
+    await prisma.category.create({ data: { name: "餐饮", type: "EXPENSE", isSystem: true, sortOrder: 42 } });
+    const backup = await exportBackup();
+    await resetDatabase();
+    expect((await importLedger(importRequest(backup))).status).toBe(200);
+    expect(await prisma.category.findUnique({ where: { name_type: { name: "餐饮", type: "EXPENSE" } } })).toMatchObject({ sortOrder: 42 });
+  });
+
   it("keeps distinct same-name subscriptions and occurrences across repeated restore", async () => {
     const category = await prisma.category.create({ data: { name: "会员", type: "EXPENSE" } });
     for (const amountCents of [1000, 2000]) {
@@ -96,5 +104,40 @@ describe("lossless JSON backup restore", () => {
     const row = { id: "duplicate", name: "音乐会员", categoryId: category.id, amountCents: 1000, billingDay: 1, startMonth: "2024-05" };
     expect((await importLedger(importRequest({ version: 1, subscriptions: [row, { ...row, amountCents: 2000 }] }))).status).toBe(400);
     expect(await prisma.subscription.count()).toBe(0);
+  });
+
+  it("keeps released soft-deleted occurrences alongside their live replacements", async () => {
+    const category = await prisma.category.create({ data: { name: "会员" } });
+    const subscription = await prisma.subscription.create({ data: {
+      name: "音乐", categoryId: category.id, amountCents: 1000, billingDay: 1, startMonth: monthStart("2024-05"),
+    } });
+    const occurrence = {
+      type: "EXPENSE" as const, categoryId: category.id, amountCents: 1000, occurredOn: parseDateOnly("2024-05-01"),
+      source: "SUBSCRIPTION" as const, subscriptionId: subscription.id, subscriptionMonth: monthStart("2024-05"),
+    };
+    await prisma.transaction.create({ data: { ...occurrence, deletedAt: new Date("2024-05-02"), subscriptionOccurrenceKey: null } });
+    await prisma.transaction.create({ data: { ...occurrence, subscriptionOccurrenceKey: `${subscription.id}:2024-05` } });
+    const backup = await exportBackup();
+    await resetDatabase();
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const response = await importLedger(importRequest(backup, backup.transactions));
+      expect(response.status).toBe(200);
+      expect(await prisma.transaction.count()).toBe(2);
+      expect(await prisma.transaction.count({ where: { deletedAt: null } })).toBe(1);
+      expect(await prisma.transaction.count({ where: { deletedAt: { not: null }, subscriptionOccurrenceKey: null } })).toBe(1);
+    }
+  });
+
+  it("round-trips legal settlement aggregates above the per-transaction amount ceiling", async () => {
+    await prisma.monthlySettlement.create({ data: {
+      month: monthStart("2024-05"), budgetAmountCents: 0, expenseAmountCents: 2_100_000_000,
+      incomeAmountCents: 0, remainingAmountCents: -2_100_000_000,
+    } });
+    const backup = await exportBackup();
+    await resetDatabase();
+    expect((await importLedger(importRequest(backup))).status).toBe(200);
+    expect(await prisma.monthlySettlement.findUnique({ where: { month: monthStart("2024-05") } })).toMatchObject({
+      expenseAmountCents: 2_100_000_000, remainingAmountCents: -2_100_000_000,
+    });
   });
 });

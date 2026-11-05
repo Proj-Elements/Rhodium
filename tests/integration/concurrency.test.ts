@@ -1,6 +1,9 @@
 import { Prisma } from "@prisma/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as createTransaction } from "@/app/api/transactions/route";
+import { PATCH as patchTransaction, DELETE as deleteTransaction } from "@/app/api/transactions/[id]/route";
+import { POST as importLedger } from "@/app/api/import/route";
+import { PUT as putBudget } from "@/app/api/budgets/[month]/route";
 import { POST as settleMonth } from "@/app/api/settlements/[month]/settle/route";
 import { POST as createSubscription } from "@/app/api/subscriptions/route";
 import { DELETE as deleteSubscription, PATCH as patchSubscription } from "@/app/api/subscriptions/[id]/route";
@@ -78,6 +81,71 @@ describe("ledger write serialization", () => {
     const summary = await getMonthSummary("2024-05");
     expect(summary.expenseCents).toBe(1_000);
     expect(summary.dailyBreakdown.reduce((sum, day) => sum + day.expenseCents, 0)).toBe(summary.expenseCents);
+  });
+
+  it.each(["create", "edit", "move", "delete", "restore", "reimburse", "unreimburse", "import", "budget"])(
+    "rejects %s after a settlement wins the database lock",
+    async (operation) => {
+      const category = await createCategory();
+      const row = await addTransaction({ categoryId: category.id, date: "2024-05-10", amountCents: 1000 });
+      if (operation === "restore") await prisma.transaction.update({ where: { id: row.id }, data: { deletedAt: new Date() } });
+      if (operation === "unreimburse") await prisma.transaction.update({ where: { id: row.id }, data: { reimbursedAt: new Date() } });
+      const original = await prisma.transaction.findUniqueOrThrow({ where: { id: row.id } });
+      const paused = deferred();
+      const resume = deferred();
+      intercept = async (params, next) => {
+        if (params.model === "MonthlySettlement" && params.action === "upsert") {
+          paused.resolve();
+          await resume.promise;
+        }
+        return next(params);
+      };
+      const settling = settleMonth(request("/api/settlements/2024-05/settle", "POST"), routeContext({ month: "2024-05" }));
+      await paused.promise;
+      lockAttempt = deferred();
+      const body = { type: "expense", amount: "20", occurredOn: operation === "move" ? "2024-06-10" : "2024-05-10", categoryId: category.id };
+      const writing = operation === "create"
+        ? createTransaction(request("/api/transactions", "POST", body))
+        : operation === "delete"
+          ? deleteTransaction(request(`/api/transactions/${row.id}`, "DELETE"), routeContext({ id: row.id }))
+          : operation === "import"
+            ? importLedger(request("/api/import", "POST", { format: "json", rows: [body] }))
+            : operation === "budget"
+              ? putBudget(request("/api/budgets/2024-05", "PUT", { amount: "20" }), routeContext({ month: "2024-05" }))
+              : patchTransaction(request(`/api/transactions/${row.id}`, "PATCH",
+                ["restore", "reimburse", "unreimburse"].includes(operation) ? { [operation]: true } : body), routeContext({ id: row.id }));
+      await releaseWhenContenderStarts(writing, resume.resolve);
+      const [settled, rejected] = await Promise.all([settling, writing]);
+      expect(settled.status).toBe(200);
+      expect(rejected.status).toBe(409);
+      expect(await prisma.transaction.findUniqueOrThrow({ where: { id: row.id } })).toEqual(original);
+      expect(await prisma.transaction.count()).toBe(1);
+      expect(await prisma.monthlyBudget.count()).toBe(0);
+    },
+  );
+
+  it("includes a reimbursement that wins the lock in the settled budget snapshot", async () => {
+    const category = await createCategory();
+    const row = await addTransaction({ categoryId: category.id, date: "2024-05-10", amountCents: 1000 });
+    await prisma.budgetPreset.create({ data: { id: 1, amountCents: 5000 } });
+    const paused = deferred();
+    const resume = deferred();
+    intercept = async (params, next) => {
+      if (params.model === "Transaction" && params.action === "update") {
+        paused.resolve();
+        await resume.promise;
+      }
+      return next(params);
+    };
+    const writing = patchTransaction(request(`/api/transactions/${row.id}`, "PATCH", { reimburse: true }), routeContext({ id: row.id }));
+    await paused.promise;
+    lockAttempt = deferred();
+    const settling = settleMonth(request("/api/settlements/2024-05/settle", "POST"), routeContext({ month: "2024-05" }));
+    await releaseWhenContenderStarts(settling, resume.resolve);
+    const [reimbursed, settled] = await Promise.all([writing, settling]);
+    expect(reimbursed.status).toBe(200);
+    expect(settled.status).toBe(200);
+    expect(await getMonthSummary("2024-05")).toMatchObject({ expenseCents: 1000, outOfPocketCents: 0, remainingCents: 5000 });
   });
 
   it("finishes an active sync before a pause can report success", async () => {

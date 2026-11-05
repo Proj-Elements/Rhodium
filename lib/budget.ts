@@ -2,6 +2,7 @@ import type { Prisma } from "@prisma/client";
 import { monthKey, monthStart } from "@/lib/domain";
 import { prisma } from "@/lib/prisma";
 import { withLedgerWrite } from "@/lib/ledger-write";
+import { conflict } from "@/lib/errors";
 
 /** The single-row preset; pass the writer's client for a coherent settlement. */
 export async function getBudgetPreset(db: Prisma.TransactionClient = prisma): Promise<number | null> {
@@ -46,11 +47,16 @@ export async function resolveBudgets(months: string[], db: Prisma.TransactionCli
   }));
 }
 
-/** Save a monthly budget row, creating or updating as needed. */
+/** Save one month's budget under the same lock and settled-state guard as API writes. */
 export async function saveMonthlyBudget(month: string, amountCents: number): Promise<void> {
-  await prisma.monthlyBudget.upsert({
-    where: { month: monthStart(month) },
-    create: { month: monthStart(month), amountCents },
-    update: { amountCents },
+  await withLedgerWrite(async (tx) => {
+    const monthDate = monthStart(month);
+    const settlement = await tx.monthlySettlement.findUnique({ where: { month: monthDate }, select: { reopenedAt: true } });
+    if (settlement && !settlement.reopenedAt) throw conflict("本月已经结算，请先重新打开本月");
+    await tx.monthlyBudget.upsert({
+      where: { month: monthDate },
+      create: { month: monthDate, amountCents },
+      update: { amountCents },
+    });
   });
 }

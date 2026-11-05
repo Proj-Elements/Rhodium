@@ -122,7 +122,7 @@ const backupCategorySchema = z.object({
   name: z.string().trim().min(1).max(30),
   type: z.string().optional().nullable(),
   isSystem: z.union([z.boolean(), z.string()]).optional(),
-  sortOrder: z.union([z.number(), z.string()]).optional(),
+  sortOrder: z.coerce.number().int().min(-2_147_483_648).max(2_147_483_647).optional(),
   archivedAt: z.string().optional().nullable(),
   icon: categoryIconValue,
 });

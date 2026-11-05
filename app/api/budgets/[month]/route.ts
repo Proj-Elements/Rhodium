@@ -72,10 +72,10 @@ export async function PUT(request: Request, { params }: Context) {
           .filter((rowMonth) => !lockedKeys.has(monthKey(rowMonth)))
           .map((rowMonth) => ({ month: rowMonth, amountCents }));
         await tx.monthlyBudget.createMany({ data: rows, skipDuplicates: true });
-          // Re-assert the amount for rows that already existed with another value.
+        // Re-assert the amount for rows that already existed with another value.
         await tx.monthlyBudget.updateMany({
-            where: { month: { gte: monthDate, lte: horizonEnd, notIn: locked.map((row) => row.month) } },
-            data: { amountCents },
+          where: { month: { gte: monthDate, lte: horizonEnd, notIn: locked.map((row) => row.month) } },
+          data: { amountCents },
         });
         return NextResponse.json({ budget: { amountCents }, scope, monthsSet: rows.length, throughMonth: monthKey(horizonEnd) });
       }
@@ -84,8 +84,8 @@ export async function PUT(request: Request, { params }: Context) {
         where: { month: monthDate },
         create: { month: monthDate, amountCents },
         update: { amountCents },
-    });
-    return NextResponse.json({ budget: { amountCents: budget.amountCents }, scope });
+      });
+      return NextResponse.json({ budget: { amountCents: budget.amountCents }, scope });
     });
   } catch (error) {
     return handleApiError(error);

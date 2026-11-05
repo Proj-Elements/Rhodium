@@ -93,6 +93,7 @@ async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
       // Missing legacy fields preserve local metadata; explicit values restore it.
       const metadata = {
         ...(row.icon !== undefined ? { icon: row.icon } : {}),
+        ...(row.sortOrder !== undefined ? { sortOrder: row.sortOrder } : {}),
         ...(row.archivedAt !== undefined ? { archivedAt: optionalDateTime(row.archivedAt, "分类归档时间") } : {}),
       };
       if (Object.keys(metadata).length) {
@@ -111,7 +112,7 @@ async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
         // isSystem is owned by the seed (it gates archiving in the UI), so an
         // imported category never claims it.
         isSystem: false,
-        sortOrder: Number.isFinite(Number(row.sortOrder)) ? Number(row.sortOrder) : 0,
+        sortOrder: row.sortOrder ?? 0,
         archivedAt: optionalDateTime(row.archivedAt, "分类归档时间"),
       },
     });
@@ -173,13 +174,13 @@ async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
     if (!month) continue;
     const data = {
       month,
-      budgetAmountCents: parseCents(row.budgetAmountCents, "结算预算金额"),
-      expenseAmountCents: parseCents(row.expenseAmountCents, "结算支出金额"),
-      incomeAmountCents: parseCents(row.incomeAmountCents, "结算收入金额"),
+      budgetAmountCents: parseCents(row.budgetAmountCents, "结算预算金额", 2_147_483_647),
+      expenseAmountCents: parseCents(row.expenseAmountCents, "结算支出金额", 2_147_483_647),
+      incomeAmountCents: parseCents(row.incomeAmountCents, "结算收入金额", 2_147_483_647),
       remainingAmountCents:
         row.remainingAmountCents === null || row.remainingAmountCents === undefined
           ? null
-          : parseSignedCents(row.remainingAmountCents, "结算剩余金额"),
+          : parseSignedCents(row.remainingAmountCents, "结算剩余金额", -2_147_483_648, 2_147_483_647),
       settledAt: optionalDateTime(row.settledAt, "结算时间") ?? new Date(),
       reopenedAt: optionalDateTime(row.reopenedAt, "重新打开时间"),
     };
@@ -288,8 +289,12 @@ export async function POST(request: Request) {
         // Rebuilt rather than trusted: remapping a subscription invalidates an
         // imported "<subscriptionId>:<month>" key, and the format must stay in
         // sync with syncSubscriptions().
+        // A deleted historical occurrence may have released its key to a live
+        // replacement. Reclaiming it here would silently drop one of the rows.
+        const releasedOccurrence = row.deletedAt && !row.subscriptionOccurrenceKey;
         const occurrenceKey =
-          subscriptionId && subscriptionMonth && row.source === "SUBSCRIPTION" ? `${subscriptionId}:${monthKey(subscriptionMonth)}` : null;
+          subscriptionId && subscriptionMonth && row.source === "SUBSCRIPTION" && !releasedOccurrence
+            ? `${subscriptionId}:${monthKey(subscriptionMonth)}` : null;
 
         const data: Prisma.TransactionCreateManyInput = {
           type: row.type,

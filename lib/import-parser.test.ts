@@ -74,6 +74,14 @@ describe("import validation helpers", () => {
     expect(() => parseTransactionType("报销")).toThrow("类型只能是支出或收入");
   });
 
+  it("keeps per-row limits while accepting the signed Int settlement boundaries", () => {
+    expect(() => parseCents(2_147_483_647, "金额")).toThrow();
+    expect(parseCents(2_147_483_647, "结算支出金额", 2_147_483_647)).toBe(2_147_483_647);
+    expect(parseSignedCents(-2_147_483_648, "结算剩余金额", -2_147_483_648, 2_147_483_647)).toBe(-2_147_483_648);
+    expect(() => parseCents(2_147_483_648, "结算支出金额", 2_147_483_647)).toThrow();
+    expect(() => parseSignedCents(-2_147_483_649, "结算剩余金额", -2_147_483_648, 2_147_483_647)).toThrow();
+  });
+
   it("validateRowShallow accepts good rows and rejects bad ones", () => {
     expect(() => validateRowShallow({ occurredOn: "2025-09-01", amount: "9.9", type: "支出" })).not.toThrow();
     expect(() => validateRowShallow({ occurredOn: "not-a-date", amount: "9.9" })).toThrow();
