@@ -41,14 +41,31 @@ function tooLargeMessage(maxBytes: number): string {
 export async function parseJsonBody(request: Request, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) throw new AppError(tooLargeMessage(maxBytes), 413);
-  let text: string;
+  // Content-Length may be missing or false. Stop at the byte boundary instead
+  // of buffering the entire stream before rejecting it (especially imports).
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  const reader = request.body?.getReader();
   try {
-    text = await request.text();
-  } catch {
+    if (reader) {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received += value.byteLength;
+        if (received > maxBytes) {
+          await reader.cancel().catch(() => undefined);
+          throw new AppError(tooLargeMessage(maxBytes), 413);
+        }
+        chunks.push(value);
+      }
+    }
+  } catch (error) {
+    if (error instanceof AppError) throw error;
     throw new AppError("无法读取请求体", 400);
+  } finally {
+    reader?.releaseLock();
   }
-  // content-length is optional and untrusted: check what actually arrived.
-  if (Buffer.byteLength(text, "utf8") > maxBytes) throw new AppError(tooLargeMessage(maxBytes), 413);
+  const text = Buffer.concat(chunks, received).toString("utf8");
   try {
     return JSON.parse(text) as unknown;
   } catch {

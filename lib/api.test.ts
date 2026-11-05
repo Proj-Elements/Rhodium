@@ -32,6 +32,36 @@ describe("parseJsonBody", () => {
     await expect(parseJsonBody(request)).rejects.toMatchObject({ status: 413 });
   });
 
+  it("stops consuming an undeclared oversized stream as soon as its byte cap is exceeded", async () => {
+    let pulled = 0;
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += 1;
+        if (pulled <= 100) controller.enqueue(new Uint8Array(32).fill(32));
+        else controller.close();
+      },
+      cancel,
+    }, { highWaterMark: 0 });
+    const request = new Request("http://localhost/api/test", { method: "POST", body, duplex: "half" } as RequestInit);
+    await expect(parseJsonBody(request, 64)).rejects.toMatchObject({ status: 413 });
+    expect(pulled).toBe(3);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("decodes UTF-8 characters split across stream chunks", async () => {
+    const bytes = new TextEncoder().encode('{"note":"午饭"}');
+    let offset = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (offset < bytes.length) controller.enqueue(bytes.slice(offset, ++offset));
+        else controller.close();
+      },
+    });
+    const request = new Request("http://localhost/api/test", { method: "POST", body, duplex: "half" } as RequestInit);
+    await expect(parseJsonBody(request)).resolves.toEqual({ note: "午饭" });
+  });
+
   it("measures bytes rather than characters for multi-byte notes", async () => {
     // 30 Chinese characters are 90 UTF-8 bytes, so a 60-byte cap must reject.
     await expect(parseJsonBody(jsonRequest(`{"note":"${"备".repeat(30)}"}`), 60)).rejects.toMatchObject({

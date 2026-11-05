@@ -82,6 +82,17 @@ export const categoryPatchSchema = z
 
 const backupIdValue = z.string().trim().min(1).max(60);
 
+/** Zod 3 array.max still validates every element; bound work before that step. */
+function boundedArray<T extends z.ZodTypeAny>(element: T, maximum: number) {
+  return z.preprocess((value, context) => {
+    if (Array.isArray(value) && value.length > maximum) {
+      context.addIssue({ code: z.ZodIssueCode.too_big, type: "array", maximum, inclusive: true, fatal: true });
+      return z.NEVER;
+    }
+    return value;
+  }, z.array(element).max(maximum));
+}
+
 /**
  * Backup payloads used to be `z.record(z.unknown())`, which let a caller push
  * arbitrary shapes — including primary keys — straight into `upsert`. The rows
@@ -131,14 +142,14 @@ const backupSettlementSchema = z.object({
 export const backupSchema = z.object({
   version: z.union([z.number(), z.string()]).optional(),
   exportedAt: z.string().optional(),
-  categories: z.array(backupCategorySchema).max(500).optional(),
-  subscriptions: z.array(backupSubscriptionSchema).max(500)
+  categories: boundedArray(backupCategorySchema, 500).optional(),
+  subscriptions: boundedArray(backupSubscriptionSchema, 500)
     .refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "备份包含重复订阅 ID")
     .optional(),
   // Missing in legacy backups means preserve; explicit null restores no preset.
   budgetPreset: z.object({ amountCents: z.number().int().min(0).max(2_000_000_000) }).nullable().optional(),
-  budgets: z.array(backupBudgetSchema).max(1200).optional(),
-  settlements: z.array(backupSettlementSchema).max(1200).optional(),
+  budgets: boundedArray(backupBudgetSchema, 1200).optional(),
+  settlements: boundedArray(backupSettlementSchema, 1200).optional(),
 });
 
 export type BackupPayload = z.infer<typeof backupSchema>;
@@ -148,6 +159,6 @@ export const importSchema = z.object({
   // Empty row lists are legal: a full backup may only carry categories,
   // subscriptions, budgets or settlements. The real ceiling on a payload is
   // the 8 MB body limit; this cap just bounds the row-loop work inside.
-  rows: z.array(z.record(z.unknown())).max(20_000),
+  rows: boundedArray(z.record(z.unknown()), 20_000),
   backup: backupSchema.optional(),
 });

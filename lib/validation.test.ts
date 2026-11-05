@@ -77,6 +77,12 @@ describe("backupSchema", () => {
     expect(() => backupSchema.parse({ settlements: [{ month: "2025-08", budgetAmountCents: 1, expenseAmountCents: 1, incomeAmountCents: 1 }] })).toThrow();
   });
 
+  it("rejects oversized collections before accumulating every invalid element's issues", () => {
+    const result = backupSchema.safeParse({ categories: Array(501).fill(null) });
+    expect(result.success).toBe(false);
+    if (!result.success) expect(result.error.issues).toHaveLength(1);
+  });
+
   it("caps payload size so one request cannot balloon the restore", () => {
     const rows = Array.from({ length: 501 }, (_, index) => ({ id: `c${index}`, name: `分类${index}` }));
     expect(() => backupSchema.parse({ categories: rows })).toThrow();
