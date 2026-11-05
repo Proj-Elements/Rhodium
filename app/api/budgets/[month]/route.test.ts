@@ -14,6 +14,7 @@ vi.mock("@/lib/prisma", () => ({
     monthlySettlement: { findUnique: vi.fn(), findMany: vi.fn() },
     budgetPreset: { findUnique: vi.fn() },
     $transaction: vi.fn(),
+    $queryRaw: vi.fn(),
   },
 }));
 
@@ -46,7 +47,8 @@ beforeEach(() => {
   createMany.mockReturnValue({ count: 0 });
   updateMany.mockReturnValue({ count: 0 });
   upsert.mockResolvedValue({ amountCents: 150_000 });
-  transaction.mockResolvedValue([]);
+  transaction.mockImplementation(async (work) => work(prisma));
+  vi.mocked(prisma.$queryRaw).mockResolvedValue([{ locked: 1 }]);
 });
 
 describe("PUT /api/budgets/[month]", () => {
@@ -99,7 +101,10 @@ describe("PUT /api/budgets/[month]", () => {
   it("runs the future writes in one transaction", async () => {
     await put("2026-03", "future");
     expect(transaction).toHaveBeenCalledTimes(1);
-    expect(transaction.mock.calls[0][0]).toHaveLength(2);
+    expect(prisma.$queryRaw).toHaveBeenCalledOnce();
+    expect(vi.mocked(prisma.$queryRaw).mock.invocationCallOrder[0]).toBeLessThan(createMany.mock.invocationCallOrder[0]);
+    expect(createMany).toHaveBeenCalledOnce();
+    expect(updateMany).toHaveBeenCalledOnce();
   });
 
   it("refuses to rewrite a settled month", async () => {

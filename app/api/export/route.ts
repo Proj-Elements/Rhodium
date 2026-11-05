@@ -10,14 +10,17 @@ export async function GET(request: Request) {
   try {
     const format = new URL(request.url).searchParams.get("format") || "json";
     if (format !== "json" && format !== "csv") return jsonError("导出格式只能是 JSON 或 CSV", 400);
-    const [transactions, categories, budgets, subscriptions, settlements, budgetPreset] = await Promise.all([
-      prisma.transaction.findMany({ where: format === "csv" ? { deletedAt: null } : undefined, orderBy: { occurredOn: "asc" } }),
-      prisma.category.findMany({ orderBy: { sortOrder: "asc" } }),
-      prisma.monthlyBudget.findMany({ orderBy: { month: "asc" } }),
-      prisma.subscription.findMany({ orderBy: { startMonth: "asc" } }),
-      prisma.monthlySettlement.findMany({ orderBy: { month: "asc" } }),
-      prisma.budgetPreset.findUnique({ where: { id: 1 }, select: { amountCents: true } }),
-    ]);
+    // A repeatable-read snapshot keeps related tables consistent even while a
+    // writer commits; backups must not mix categories/subscriptions from one
+    // revision with transaction rows from another.
+    const [transactions, categories, budgets, subscriptions, settlements, budgetPreset] = await prisma.$transaction((tx) => Promise.all([
+      tx.transaction.findMany({ where: format === "csv" ? { deletedAt: null } : undefined, orderBy: { occurredOn: "asc" } }),
+      tx.category.findMany({ orderBy: { sortOrder: "asc" } }),
+      tx.monthlyBudget.findMany({ orderBy: { month: "asc" } }),
+      tx.subscription.findMany({ orderBy: { startMonth: "asc" } }),
+      tx.monthlySettlement.findMany({ orderBy: { month: "asc" } }),
+      tx.budgetPreset.findUnique({ where: { id: 1 }, select: { amountCents: true } }),
+    ]), { isolationLevel: "RepeatableRead" });
     const categoryNames = new Map(categories.map((category) => [category.id, category.name]));
 
     if (format === "csv") {

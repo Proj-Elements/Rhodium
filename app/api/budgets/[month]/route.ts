@@ -3,6 +3,7 @@ import { handleApiError, parseJsonBody, monthRange } from "@/lib/api";
 import { addMonths, moneyToCents, monthKey, monthStart, parseMonth } from "@/lib/domain";
 import { conflict } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
+import { withLedgerWrite } from "@/lib/ledger-write";
 import { budgetSchema } from "@/lib/validation";
 import { isMonthLocked } from "@/lib/summary";
 import { getBudgetPreset } from "@/lib/budget";
@@ -51,7 +52,8 @@ export async function PUT(request: Request, { params }: Context) {
     parseMonth(month);
     const { scope } = putQuerySchema.parse(Object.fromEntries(new URL(request.url).searchParams));
     const body = budgetSchema.parse(await parseJsonBody(request));
-    if (await isMonthLocked(month)) throw conflict("本月已经结算，请先重新打开本月");
+    return await withLedgerWrite(async (tx) => {
+    if (await isMonthLocked(month, tx)) throw conflict("本月已经结算，请先重新打开本月");
     const amountCents = moneyToCents(body.amount);
     const monthDate = monthRange(month).start;
 
@@ -61,7 +63,7 @@ export async function PUT(request: Request, { params }: Context) {
       const horizonEnd = monthStart(addMonths(month, FUTURE_MONTH_LIMIT - 1));
       // Settled months keep their own budget: rewriting one would desync the
       // snapshot already stored in MonthlySettlement.
-      const locked = await prisma.monthlySettlement.findMany({
+      const locked = await tx.monthlySettlement.findMany({
         where: { month: { gte: monthDate, lte: horizonEnd }, reopenedAt: null },
         select: { month: true },
       });
@@ -69,23 +71,22 @@ export async function PUT(request: Request, { params }: Context) {
       const rows = Array.from({ length: FUTURE_MONTH_LIMIT }, (_, index) => monthStart(addMonths(month, index)))
         .filter((rowMonth) => !lockedKeys.has(monthKey(rowMonth)))
         .map((rowMonth) => ({ month: rowMonth, amountCents }));
-      await prisma.$transaction([
-        prisma.monthlyBudget.createMany({ data: rows, skipDuplicates: true }),
+      await tx.monthlyBudget.createMany({ data: rows, skipDuplicates: true });
         // Re-assert the amount for rows that already existed with another value.
-        prisma.monthlyBudget.updateMany({
+      await tx.monthlyBudget.updateMany({
           where: { month: { gte: monthDate, lte: horizonEnd, notIn: locked.map((row) => row.month) } },
           data: { amountCents },
-        }),
-      ]);
+      });
       return NextResponse.json({ budget: { amountCents }, scope, monthsSet: rows.length, throughMonth: monthKey(horizonEnd) });
     }
 
-    const budget = await prisma.monthlyBudget.upsert({
+    const budget = await tx.monthlyBudget.upsert({
       where: { month: monthDate },
       create: { month: monthDate, amountCents },
       update: { amountCents },
     });
     return NextResponse.json({ budget: { amountCents: budget.amountCents }, scope });
+    });
   } catch (error) {
     return handleApiError(error);
   }
@@ -95,9 +96,11 @@ export async function DELETE(_request: Request, { params }: Context) {
   try {
     const { month } = await params;
     parseMonth(month);
-    if (await isMonthLocked(month)) throw conflict("本月已经结算，请先重新打开本月");
-    await prisma.monthlyBudget.deleteMany({ where: { month: monthStart(month) } });
+    return await withLedgerWrite(async (tx) => {
+    if (await isMonthLocked(month, tx)) throw conflict("本月已经结算，请先重新打开本月");
+    await tx.monthlyBudget.deleteMany({ where: { month: monthStart(month) } });
     return NextResponse.json({ deleted: true, month });
+    });
   } catch (error) {
     return handleApiError(error);
   }

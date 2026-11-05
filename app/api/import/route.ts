@@ -13,7 +13,8 @@ import {
   type NormalizedRow,
 } from "@/lib/import-parser";
 import { conflict } from "@/lib/errors";
-import { prisma } from "@/lib/prisma";
+import { withLedgerWrite } from "@/lib/ledger-write";
+import { invalidateSubscriptionSyncCache } from "@/lib/subscriptions";
 import { ensureDefaultCategories } from "@/lib/seed";
 import { importSchema, type BackupPayload } from "@/lib/validation";
 import { getLockedMonths } from "@/lib/summary";
@@ -234,19 +235,17 @@ export async function POST(request: Request) {
       ...(body.backup?.budgets ?? []).map((row) => monthKey(parseDateOnly(row.month))),
       ...(body.backup?.settlements ?? []).map((row) => monthKey(parseDateOnly(row.month))),
     ];
-    const existingMonths = externalIds.length
-      ? (await prisma.transaction.findMany({ where: { id: { in: externalIds } }, select: { occurredOn: true } })).map((item) =>
-          monthKey(item.occurredOn),
-        )
-      : [];
-    const lockedMonths = await getLockedMonths([...new Set([...targetMonths, ...existingMonths, ...backupMonths])]);
-    if (lockedMonths.length) throw conflict(`${lockedMonths.sort().join("、")} 已结算，请先重新打开后再导入`);
-
-    await ensureDefaultCategories();
     let imported = 0;
     const idMap: IdMap = { categories: new Map(), subscriptions: new Map() };
-
-    await prisma.$transaction(async (tx) => {
+    await withLedgerWrite(async (tx) => {
+      const existingMonths = externalIds.length
+        ? (await tx.transaction.findMany({ where: { id: { in: externalIds } }, select: { occurredOn: true } })).map((item) =>
+            monthKey(item.occurredOn),
+          )
+        : [];
+      const lockedMonths = await getLockedMonths([...new Set([...targetMonths, ...existingMonths, ...backupMonths])], tx);
+      if (lockedMonths.length) throw conflict(`${lockedMonths.sort().join("、")} 已结算，请先重新打开后再导入`);
+      await ensureDefaultCategories(tx);
       if (body.backup) await importBackup(tx, body.backup, idMap);
 
       // Preload the whole category list once instead of findFirst per row.
@@ -338,6 +337,7 @@ export async function POST(request: Request) {
       }
 
     }, IMPORT_TRANSACTION_OPTIONS);
+    invalidateSubscriptionSyncCache();
 
     return NextResponse.json({ imported });
   } catch (error) {

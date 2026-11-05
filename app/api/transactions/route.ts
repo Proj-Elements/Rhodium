@@ -4,6 +4,7 @@ import { handleApiError, parseJsonBody, monthRange } from "@/lib/api";
 import { parseMonth, todayInShanghai } from "@/lib/domain";
 import { conflict } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
+import { withLedgerWrite } from "@/lib/ledger-write";
 import { ensureDefaultCategories } from "@/lib/seed";
 import { serializeTransaction, transactionInclude } from "@/lib/serializers";
 import { transactionSchema } from "@/lib/validation";
@@ -44,12 +45,11 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = transactionSchema.parse(await parseJsonBody(request));
-    if (await isMonthLocked(body.occurredOn.slice(0, 7))) throw conflict("本月已经结算，请先重新打开本月");
-    await ensureDefaultCategories();
-    await assertTransactionCategory(body.categoryId, body.type);
-    const transaction = await prisma.transaction.create({
-      data: transactionData(body),
-      include: transactionInclude,
+    const transaction = await withLedgerWrite(async (tx) => {
+      if (await isMonthLocked(body.occurredOn.slice(0, 7), tx)) throw conflict("本月已经结算，请先重新打开本月");
+      await ensureDefaultCategories(tx);
+      await assertTransactionCategory(body.categoryId, body.type, tx);
+      return tx.transaction.create({ data: transactionData(body), include: transactionInclude });
     });
     return NextResponse.json({ transaction: serializeTransaction(transaction) }, { status: 201 });
   } catch (error) {

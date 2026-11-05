@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { handleApiError, jsonError } from "@/lib/api";
 import { monthStart, parseMonth, todayInShanghai } from "@/lib/domain";
-import { prisma } from "@/lib/prisma";
+import { withLedgerWrite } from "@/lib/ledger-write";
+import { badRequest } from "@/lib/errors";
 import { getMonthSummary } from "@/lib/summary";
 import { syncSubscriptions } from "@/lib/subscriptions";
 
@@ -14,9 +15,14 @@ export async function POST(_request: Request, { params }: Context) {
     const { month } = await params;
     parseMonth(month);
     if (month > todayInShanghai().slice(0, 7)) return jsonError("未来月份还不能结算", 400);
-    await syncSubscriptions();
-    const summary = await getMonthSummary(month);
-    const settlement = await prisma.monthlySettlement.upsert({
+    const settlement = await withLedgerWrite(async (tx) => {
+    await syncSubscriptions(undefined, tx);
+    const summary = await getMonthSummary(month, tx);
+    const values = [summary.budgetCents, summary.expenseCents, summary.incomeCents, summary.remainingCents];
+    if (values.some((value) => value !== null && (!Number.isSafeInteger(value) || value < -2_147_483_648 || value > 2_147_483_647))) {
+      throw badRequest("结算合计超出可保存范围，请先调整账目金额");
+    }
+    return tx.monthlySettlement.upsert({
       where: { month: monthStart(month) },
       create: {
         month: monthStart(month),
@@ -36,6 +42,7 @@ export async function POST(_request: Request, { params }: Context) {
         settledAt: new Date(),
         reopenedAt: null,
       },
+    });
     });
     return NextResponse.json({
       settlement: {

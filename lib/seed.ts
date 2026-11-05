@@ -1,5 +1,5 @@
-import { CategoryType } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { CategoryType, type Prisma } from "@prisma/client";
+import { withLedgerWrite } from "@/lib/ledger-write";
 
 const defaults = [
   ["餐饮", CategoryType.EXPENSE],
@@ -29,9 +29,15 @@ export function resetSeedCache() {
  * state GET requests no longer issue a `createMany` write on every call
  * (fresh processes after a deploy still seed exactly once).
  */
-export async function ensureDefaultCategories() {
-  if (seeded) return;
-  await prisma.category.createMany({
+export async function ensureDefaultCategories(tx?: Prisma.TransactionClient) {
+  if (!tx) {
+    if (seeded) return;
+    await withLedgerWrite((db) => ensureDefaultCategories(db));
+    seeded = true;
+    return;
+  }
+  // Do not publish a process flag before the enclosing transaction commits.
+  await tx.category.createMany({
     data: defaults.map(([name, type], index) => ({
       name,
       type,
@@ -40,5 +46,4 @@ export async function ensureDefaultCategories() {
     })),
     skipDuplicates: true,
   });
-  seeded = true;
 }

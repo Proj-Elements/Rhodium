@@ -1,47 +1,35 @@
 import { NextResponse } from "next/server";
 import { handleApiError, parseJsonBody } from "@/lib/api";
 import { notFound } from "@/lib/errors";
-import { prisma } from "@/lib/prisma";
+import { withLedgerWrite } from "@/lib/ledger-write";
 import { subscriptionSchema, subscriptionToggleSchema } from "@/lib/validation";
 import { assertExpenseCategory, invalidateSubscriptionSyncCache, subscriptionData, syncSubscriptions } from "@/lib/subscriptions";
 import { serializeSubscription, subscriptionInclude } from "@/lib/subscription-serializer";
 
 export const dynamic = "force-dynamic";
-
 type Context = { params: Promise<{ id: string }> };
 
 export async function PATCH(request: Request, { params }: Context) {
   try {
     const { id } = await params;
     const body = await parseJsonBody(request);
-    const existing = await prisma.subscription.findUnique({ where: { id }, select: { id: true } });
-    if (!existing) throw notFound("固定支出不存在");
-
-    // Toggle-only bodies ({ active }) are validated strictly so unknown fields
-    // are rejected instead of silently ignored.
     const toggle = subscriptionToggleSchema.safeParse(body);
-    if (toggle.success) {
-      const subscription = await prisma.subscription.update({
+    const parsed = toggle.success ? null : subscriptionSchema.parse(body);
+    const subscription = await withLedgerWrite(async (tx) => {
+      const existing = await tx.subscription.findUnique({ where: { id }, select: { id: true } });
+      if (!existing) throw notFound("固定支出不存在");
+      if (parsed) await assertExpenseCategory(parsed.categoryId, tx);
+      const updated = await tx.subscription.update({
         where: { id },
-        data: { active: toggle.data.active },
+        data: toggle.success ? { active: toggle.data.active } : subscriptionData(parsed!),
         include: subscriptionInclude,
       });
-      // Any subscription mutation changes what a sync would write: bypass the
-      // cooldown cache so this call (and later reads) plan against new state.
-      invalidateSubscriptionSyncCache();
-      await syncSubscriptions();
-      return NextResponse.json({ subscription: serializeSubscription(subscription) });
-    }
-
-    const parsed = subscriptionSchema.parse(body);
-    await assertExpenseCategory(parsed.categoryId);
-    const subscription = await prisma.subscription.update({
-      where: { id },
-      data: subscriptionData(parsed),
-      include: subscriptionInclude,
+      // Commit the plan and its materialized occurrences together. A sync failure
+      // rolls back the edit instead of returning an error for a committed change.
+      await syncSubscriptions(undefined, tx);
+      return updated;
     });
     invalidateSubscriptionSyncCache();
-    await syncSubscriptions();
     return NextResponse.json({ subscription: serializeSubscription(subscription) });
   } catch (error) {
     return handleApiError(error);
@@ -51,14 +39,11 @@ export async function PATCH(request: Request, { params }: Context) {
 export async function DELETE(_request: Request, { params }: Context) {
   try {
     const { id } = await params;
-    // Count-then-delete must see one snapshot: a sync landing between the two
-    // used to race the delete into an FK violation (P2003).
-    const archived = await prisma.$transaction(async (tx) => {
+    // All sync writers hold this same lock, so usage cannot appear between the
+    // count and delete and be detached by ON DELETE SET NULL.
+    const archived = await withLedgerWrite(async (tx) => {
       const usage = await tx.transaction.count({ where: { subscriptionId: id } });
-      if (usage > 0) {
-        // Keep the subscription for its historical ledger entries; just pause it.
-        return await tx.subscription.update({ where: { id }, data: { active: false }, include: subscriptionInclude });
-      }
+      if (usage > 0) return tx.subscription.update({ where: { id }, data: { active: false }, include: subscriptionInclude });
       await tx.subscription.delete({ where: { id } });
       return null;
     });

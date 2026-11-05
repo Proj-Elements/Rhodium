@@ -63,7 +63,7 @@ describe("syncSubscriptions", () => {
     const category = await createCategory();
     await addSubscription("网盘", category.id);
 
-    const spy = vi.spyOn(prisma.subscription, "findMany").mockRejectedValueOnce(new Error("db down"));
+    const spy = vi.spyOn(prisma, "$transaction").mockRejectedValueOnce(new Error("db down"));
     await expect(syncSubscriptions(REFERENCE)).rejects.toThrow("db down");
     spy.mockRestore();
 

@@ -1,19 +1,19 @@
-import { TransactionType } from "@prisma/client";
+import { TransactionType, type Prisma } from "@prisma/client";
 import { calculateRemaining, dateOnlyKey, daysInMonth, monthKey, monthStart, todayInShanghai } from "@/lib/domain";
 import { resolveBudget, resolveBudgets, type ResolvedBudget } from "@/lib/budget";
 import { prisma } from "@/lib/prisma";
 import { serializeSettlement } from "@/lib/serializers";
 
-export async function isMonthLocked(month: string) {
-  const settlement = await prisma.monthlySettlement.findUnique({ where: { month: monthStart(month) }, select: { reopenedAt: true } });
+export async function isMonthLocked(month: string, db: Prisma.TransactionClient = prisma) {
+  const settlement = await db.monthlySettlement.findUnique({ where: { month: monthStart(month) }, select: { reopenedAt: true } });
   return Boolean(settlement && !settlement.reopenedAt);
 }
 
 /** Batch form of `isMonthLocked`: one query for any number of months. */
-export async function getLockedMonths(months: string[]): Promise<string[]> {
+export async function getLockedMonths(months: string[], db: Prisma.TransactionClient = prisma): Promise<string[]> {
   const unique = [...new Set(months)];
   if (!unique.length) return [];
-  const settlements = await prisma.monthlySettlement.findMany({
+  const settlements = await db.monthlySettlement.findMany({
     where: { month: { in: unique.map(monthStart) }, reopenedAt: null },
     select: { month: true },
   });
@@ -125,7 +125,7 @@ export type MonthSummary = ReturnType<typeof summarizeMonth>;
  * One transactions fetch feeds expense totals, category breakdown, top-date and
  * the daily calendar (previously the month was fetched twice).
  */
-export async function getMonthSummary(month: string): Promise<MonthSummary> {
+export async function getMonthSummary(month: string, db: Prisma.TransactionClient = prisma): Promise<MonthSummary> {
   const start = monthStart(month);
   const nextStart = new Date(start);
   nextStart.setUTCMonth(nextStart.getUTCMonth() + 1);
@@ -133,12 +133,12 @@ export async function getMonthSummary(month: string): Promise<MonthSummary> {
   const [budget, transactions, settlement] = await Promise.all([
     // Must go through resolveBudget: a month with no explicit row still
     // inherits the preset, and settlement snapshots are built from this value.
-    resolveBudget(month),
-    prisma.transaction.findMany({
+    resolveBudget(month, db),
+    db.transaction.findMany({
       where: { deletedAt: null, occurredOn: { gte: start, lt: nextStart } },
       select: SUMMARY_SELECT,
     }),
-    prisma.monthlySettlement.findUnique({ where: { month: start } }),
+    db.monthlySettlement.findUnique({ where: { month: start } }),
   ]);
 
   return summarizeMonth(month, budget, transactions, settlement);
@@ -149,7 +149,7 @@ export async function getMonthSummary(month: string): Promise<MonthSummary> {
  * Transactions are read as one span between the earliest and latest month, so
  * callers should pass a contiguous run (the settlements page passes six).
  */
-export async function getMonthSummaries(months: string[]): Promise<MonthSummary[]> {
+export async function getMonthSummaries(months: string[], db: Prisma.TransactionClient = prisma): Promise<MonthSummary[]> {
   if (!months.length) return [];
   const starts = months.map(monthStart);
   const times = starts.map((date) => date.getTime());
@@ -158,12 +158,12 @@ export async function getMonthSummaries(months: string[]): Promise<MonthSummary[
   rangeEnd.setUTCMonth(rangeEnd.getUTCMonth() + 1);
 
   const [budgets, transactions, settlements] = await Promise.all([
-    resolveBudgets(months),
-    prisma.transaction.findMany({
+    resolveBudgets(months, db),
+    db.transaction.findMany({
       where: { deletedAt: null, occurredOn: { gte: rangeStart, lt: rangeEnd } },
       select: SUMMARY_SELECT,
     }),
-    prisma.monthlySettlement.findMany({ where: { month: { in: starts } } }),
+    db.monthlySettlement.findMany({ where: { month: { in: starts } } }),
   ]);
 
   const byMonth = new Map<string, SummaryTransaction[]>();

@@ -10,6 +10,7 @@ vi.mock("@/lib/prisma", () => ({
     subscription: { findMany: vi.fn() },
     monthlySettlement: { findMany: vi.fn() },
     budgetPreset: { findUnique: vi.fn() },
+    $transaction: vi.fn(),
   },
 }));
 
@@ -21,6 +22,10 @@ beforeEach(() => {
   vi.mocked(prisma.subscription.findMany).mockResolvedValue([]);
   vi.mocked(prisma.monthlySettlement.findMany).mockResolvedValue([]);
   vi.mocked(prisma.budgetPreset.findUnique).mockResolvedValue(null);
+  vi.mocked(prisma.$transaction).mockImplementation(async (work) => {
+    if (typeof work !== "function") throw new Error("Expected a snapshot transaction");
+    return work(prisma);
+  });
 });
 
 describe("Rhodium export filenames", () => {

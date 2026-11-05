@@ -1,4 +1,5 @@
-import { TransactionType } from "@prisma/client";
+import { TransactionType, type Prisma } from "@prisma/client";
+import { withLedgerWrite } from "@/lib/ledger-write";
 import { dateOnlyKey, moneyToCents, monthStart, todayInShanghai } from "@/lib/domain";
 import { badRequest } from "@/lib/errors";
 import { planBillingCandidates } from "@/lib/subscription-planner";
@@ -12,8 +13,8 @@ type SubscriptionInput = z.infer<typeof subscriptionSchema>;
  * Reject a subscription whose category cannot hold expenses. Both the create
  * and update routes need the same check, and the same wording.
  */
-export async function assertExpenseCategory(categoryId: string): Promise<void> {
-  const category = await prisma.category.findFirst({
+export async function assertExpenseCategory(categoryId: string, db: Prisma.TransactionClient = prisma): Promise<void> {
+  const category = await db.category.findFirst({
     where: { id: categoryId, archivedAt: null, OR: [{ type: "EXPENSE" }, { type: "BOTH" }] },
     select: { id: true },
   });
@@ -39,6 +40,7 @@ const SYNC_COOLDOWN_MS = 60_000;
 
 type SyncResult = { created: number; syncedThrough: string };
 
+let syncGeneration = 0;
 let lastSync: { at: number; referenceDate: string; result: SyncResult } | null = null;
 let inFlight: { referenceDate: string; promise: Promise<SyncResult> } | null = null;
 
@@ -58,15 +60,19 @@ let inFlight: { referenceDate: string; promise: Promise<SyncResult> } | null = n
  * A failed run is never cached, and the shared promise is dropped so one
  * failure cannot poison later callers.
  */
-export function syncSubscriptions(referenceDate = todayInShanghai()): Promise<SyncResult> {
+export function syncSubscriptions(referenceDate = todayInShanghai(), tx?: Prisma.TransactionClient): Promise<SyncResult> {
+  // A caller already holding the ledger lock must see its uncommitted mutation
+  // and must never join a cached/in-flight run on a different connection.
+  if (tx) return runSync(referenceDate, tx);
   if (lastSync && lastSync.referenceDate === referenceDate && Date.now() - lastSync.at < SYNC_COOLDOWN_MS) {
     return Promise.resolve(lastSync.result);
   }
   if (inFlight && inFlight.referenceDate === referenceDate) return inFlight.promise;
 
-  const promise = runSync(referenceDate)
+  const generation = syncGeneration;
+  const promise = withLedgerWrite((db) => runSync(referenceDate, db))
     .then((result) => {
-      lastSync = { at: Date.now(), referenceDate, result };
+      if (generation === syncGeneration) lastSync = { at: Date.now(), referenceDate, result };
       return result;
     })
     .finally(() => {
@@ -84,6 +90,7 @@ export function syncSubscriptions(referenceDate = todayInShanghai()): Promise<Sy
  * the mutation never materializes.
  */
 export function invalidateSubscriptionSyncCache(): void {
+  syncGeneration += 1;
   lastSync = null;
   inFlight = null;
 }
@@ -93,7 +100,7 @@ export function resetSubscriptionSyncCache() {
   invalidateSubscriptionSyncCache();
 }
 
-async function runSync(referenceDate: string) {
+async function runSync(referenceDate: string, prisma: Prisma.TransactionClient) {
   const subscriptions = await prisma.subscription.findMany({
     where: { active: true },
     select: { id: true, amountCents: true, billingDay: true, categoryId: true, note: true, name: true, startMonth: true, endMonth: true },

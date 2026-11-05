@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { handleApiError, parseJsonBody } from "@/lib/api";
 import { prisma } from "@/lib/prisma";
+import { withLedgerWrite } from "@/lib/ledger-write";
 import { subscriptionSchema } from "@/lib/validation";
 import { assertExpenseCategory, invalidateSubscriptionSyncCache, subscriptionData, syncSubscriptions } from "@/lib/subscriptions";
 import { serializeSubscription, subscriptionInclude } from "@/lib/subscription-serializer";
@@ -19,15 +20,13 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = subscriptionSchema.parse(await parseJsonBody(request));
-    await assertExpenseCategory(body.categoryId);
-    const subscription = await prisma.subscription.create({
-      data: subscriptionData(body),
-      include: subscriptionInclude,
+    const subscription = await withLedgerWrite(async (tx) => {
+      await assertExpenseCategory(body.categoryId, tx);
+      const created = await tx.subscription.create({ data: subscriptionData(body), include: subscriptionInclude });
+      await syncSubscriptions(undefined, tx);
+      return created;
     });
-    // The new plan changes what a sync would write, so the cooldown cache must
-    // not answer this call with a run from before the row existed.
     invalidateSubscriptionSyncCache();
-    await syncSubscriptions();
     return NextResponse.json({ subscription: serializeSubscription(subscription) }, { status: 201 });
   } catch (error) {
     return handleApiError(error);

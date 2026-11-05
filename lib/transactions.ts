@@ -1,4 +1,4 @@
-import { TransactionType } from "@prisma/client";
+import { TransactionType, type Prisma } from "@prisma/client";
 import { moneyToCents, parseDateOnly } from "@/lib/domain";
 import { badRequest } from "@/lib/errors";
 import { prisma } from "@/lib/prisma";
@@ -16,8 +16,8 @@ export function transactionType(type: TransactionInput["type"]): TransactionType
  * Reject a category that is archived or cannot hold the given direction.
  * Shared by create and update so both answer with the same wording.
  */
-export async function assertTransactionCategory(categoryId: string, type: TransactionInput["type"]): Promise<void> {
-  const category = await prisma.category.findFirst({
+export async function assertTransactionCategory(categoryId: string, type: TransactionInput["type"], db: Prisma.TransactionClient = prisma): Promise<void> {
+  const category = await db.category.findFirst({
     where: { id: categoryId, archivedAt: null, OR: [{ type: "BOTH" }, { type: type === "expense" ? "EXPENSE" : "INCOME" }] },
     select: { id: true },
   });
