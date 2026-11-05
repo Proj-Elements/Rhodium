@@ -46,7 +46,7 @@ export async function GET(request: Request) {
         exportedAt: new Date().toISOString(),
         categories,
         budgetPreset,
-        transactions: transactions.map((item) => ({ ...item, occurredOn: dateOnlyKey(item.occurredOn), subscriptionMonth: item.subscriptionMonth ? dateOnlyKey(item.subscriptionMonth) : null })),
+        transactions: transactions.map((item) => ({ ...item, occurredOn: dateOnlyKey(item.occurredOn), subscriptionMonth: item.subscriptionMonth ? dateOnlyKey(item.subscriptionMonth) : null, reimbursedAt: item.reimbursedAt ? item.reimbursedAt.toISOString() : null })),
         budgets: budgets.map((item) => ({ ...item, month: dateOnlyKey(item.month) })),
         subscriptions: subscriptions.map((item) => ({ ...item, startMonth: dateOnlyKey(item.startMonth).slice(0, 7), endMonth: item.endMonth ? dateOnlyKey(item.endMonth).slice(0, 7) : null })),
         settlements: settlements.map((item) => ({ ...item, month: dateOnlyKey(item.month) })),

@@ -45,3 +45,12 @@ export async function resolveBudgets(months: string[], db: Prisma.TransactionCli
     return [month, amountCents === undefined ? fallback : { amountCents, source: "month" }];
   }));
 }
+
+/** Save a monthly budget row, creating or updating as needed. */
+export async function saveMonthlyBudget(month: string, amountCents: number): Promise<void> {
+  await prisma.monthlyBudget.upsert({
+    where: { month: monthStart(month) },
+    create: { month: monthStart(month), amountCents },
+    update: { amountCents },
+  });
+}

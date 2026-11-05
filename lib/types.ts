@@ -16,6 +16,8 @@ export type TransactionDTO = {
   category: CategoryDTO;
   note: string | null;
   source: "MANUAL" | "SUBSCRIPTION";
+  /** 已报销的支出：保留在账本里但不再计入支出与预算；null = 未报销。 */
+  reimbursedAt: string | null;
   subscriptionId: string | null;
   subscriptionMonth: string | null;
   subscription?: { name: string } | null;
@@ -30,6 +32,12 @@ export type DashboardDTO = {
   /** Where the effective budget comes from: explicit month row, preset, or unset. */
   budgetSource: "month" | "preset" | "none";
   expenseCents: number;
+  /** 本月未被报销的支出总额（报销属于回收，不算花掉）。 */
+  outOfPocketCents: number;
+  /** 本月已报销的支出总额。 */
+  reimbursedCents: number;
+  /** 报销记录数。 */
+  reimbursedCount: number;
   incomeCents: number;
   remainingCents: number | null;
   usagePercent: number | null;

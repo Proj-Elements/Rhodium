@@ -16,32 +16,32 @@ export async function POST(_request: Request, { params }: Context) {
     parseMonth(month);
     if (month > todayInShanghai().slice(0, 7)) return jsonError("未来月份还不能结算", 400);
     const settlement = await withLedgerWrite(async (tx) => {
-    await syncSubscriptions(undefined, tx);
-    const summary = await getMonthSummary(month, tx);
-    const values = [summary.budgetCents, summary.expenseCents, summary.incomeCents, summary.remainingCents];
-    if (values.some((value) => value !== null && (!Number.isSafeInteger(value) || value < -2_147_483_648 || value > 2_147_483_647))) {
-      throw badRequest("结算合计超出可保存范围，请先调整账目金额");
-    }
-    return tx.monthlySettlement.upsert({
-      where: { month: monthStart(month) },
-      create: {
-        month: monthStart(month),
-        // A month with no budget at all settles with 0 and a null remaining, which
-        // stays distinguishable from a real 0 budget (remaining would be 0 there).
-        budgetAmountCents: summary.budgetCents ?? 0,
-        expenseAmountCents: summary.expenseCents,
-        incomeAmountCents: summary.incomeCents,
-        remainingAmountCents: summary.remainingCents,
-        reopenedAt: null,
-      },
-      update: {
-        budgetAmountCents: summary.budgetCents ?? 0,
-        expenseAmountCents: summary.expenseCents,
-        incomeAmountCents: summary.incomeCents,
-        remainingAmountCents: summary.remainingCents,
-        settledAt: new Date(),
-        reopenedAt: null,
-      },
+      await syncSubscriptions(undefined, tx);
+      const summary = await getMonthSummary(month, tx);
+      const values = [summary.budgetCents, summary.expenseCents, summary.incomeCents, summary.remainingCents];
+      if (values.some((value) => value !== null && (!Number.isSafeInteger(value) || value < -2_147_483_648 || value > 2_147_483_647))) {
+        throw badRequest("结算合计超出可保存范围，请先调整账目金额");
+      }
+      return tx.monthlySettlement.upsert({
+        where: { month: monthStart(month) },
+        create: {
+          month: monthStart(month),
+          // A month with no budget at all settles with 0 and a null remaining, which
+          // stays distinguishable from a real 0 budget (remaining would be 0 there).
+          budgetAmountCents: summary.budgetCents ?? 0,
+          expenseAmountCents: summary.expenseCents,
+          incomeAmountCents: summary.incomeCents,
+          remainingAmountCents: summary.remainingCents,
+          reopenedAt: null,
+        },
+        update: {
+          budgetAmountCents: summary.budgetCents ?? 0,
+          expenseAmountCents: summary.expenseCents,
+          incomeAmountCents: summary.incomeCents,
+          remainingAmountCents: summary.remainingCents,
+          settledAt: new Date(),
+          reopenedAt: null,
+        },
     });
     });
     return NextResponse.json({

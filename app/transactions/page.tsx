@@ -10,6 +10,7 @@ import { MetricCard } from "@/components/metric-card";
 import { AppShell } from "@/components/app-shell";
 import { CategoryIcon, Icon } from "@/components/icon";
 import { MonthSwitcher } from "@/components/month-switcher";
+import { ReimburseDialog } from "@/components/reimburse-dialog";
 import { Toast, useFlash } from "@/components/toast";
 import { TransactionForm } from "@/components/transaction-form";
 import { apiFetch, errorMessage } from "@/lib/api-client";
@@ -45,6 +46,7 @@ export default function TransactionsPage() {
   const [loadedMonth, setLoadedMonth] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState<TransactionDTO | null>(null);
+  const [reimbursing, setReimbursing] = useState<TransactionDTO | null>(null);
   const [undoId, setUndoId] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [pendingDelete, setPendingDelete] = useState<TransactionDTO | null>(null);
@@ -71,6 +73,7 @@ export default function TransactionsPage() {
         if (transactionResult.readOnly) {
           setShowForm(false);
           setEditing(null);
+          setReimbursing(null);
         }
         setCategories(categoryResult.categories || []);
       },
@@ -194,6 +197,8 @@ export default function TransactionsPage() {
     ...categories.map((category) => category.id),
     ...transactions.map((transaction) => transaction.category.id),
   ]), [categories, transactions]);
+  const reimbursed = visibleTransactions.filter((transaction) => transaction.type === "EXPENSE" && transaction.reimbursedAt);
+  const reimbursedCents = reimbursed.reduce((total, transaction) => total + transaction.amountCents, 0);
   const filterCategories = categories.filter((category) => !category.archivedAt || transactions.some((transaction) => transaction.category.id === category.id));
   const filtering = Boolean(search) || categoryFilter !== "all" || filter !== "all";
   const today = todayInShanghai();
@@ -208,10 +213,11 @@ export default function TransactionsPage() {
   return (
     <AppShell actions={<><MonthSwitcher month={month} onChange={setMonth} /><Button onPress={openNew} isDisabled={readOnly || !ready}><Icon name="plus" size={16} />记一笔</Button></>}>
       <div className="page-stack">
-        <section className="grid grid-cols-1 gap-4 sm:grid-cols-3 reveal" aria-label="账目汇总">
+        <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4 reveal" aria-label="账目汇总">
           <MetricCard label={filtering ? "筛选后支出" : "当月支出"} value={loading ? "—" : formatMoney(totals.expenseCents)} detail="日常所需，也有心之所向" icon="expense" />
           <MetricCard label={filtering ? "筛选后收入" : "当月收入"} value={loading ? "—" : formatMoney(totals.incomeCents)} detail="每一份收获，都认真记下" icon="income" tone="income" />
           <MetricCard label={filtering ? "匹配的记录" : "当月记录"} value={<>{loading ? "—" : visibleTransactions.length}<span className="ml-1.5 text-xs font-normal tracking-normal text-muted">笔</span></>} detail={filtering ? `共 ${transactions.length} 笔账目，正在筛选` : "细碎的日常，清楚的来去"} icon="receipt" />
+          <MetricCard label={filtering ? "筛选内已报销" : "当月已报销"} value={loading ? "—" : formatMoney(reimbursedCents)} detail={`${reimbursed.length} 笔 · 不占预算，不计收入`} icon="wallet" tone="income" />
         </section>
 
         <Card className="panel transaction-filter-panel reveal reveal-delay-1">
@@ -245,8 +251,8 @@ export default function TransactionsPage() {
                   const palette = categoryColors.get(transaction.category.id) ?? getCategoryColor(transaction.category.id);
                   const isIncome = transaction.type === "INCOME";
                   return <div className="transaction-row" key={transaction.id}>
-                    <div className="flex min-w-0 items-center gap-3"><span className="category-symbol" style={{ color: isIncome ? "var(--success)" : palette.color, background: isIncome ? "var(--success-soft)" : palette.surface }}><CategoryIcon categoryName={transaction.category.name} type={transaction.type} icon={transaction.category.icon} size={18} /></span><div className="transaction-copy"><strong title={transaction.note || transaction.category.name}>{transaction.note || transaction.category.name}</strong><p>{transaction.category.name}{transaction.source === "SUBSCRIPTION" ? ` · 自动记录${transaction.subscription?.name ? ` / ${transaction.subscription.name}` : ""}` : " · 手动记录"}</p></div></div>
-                    <div className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-6"><span className={`transaction-value ${isIncome ? "text-success" : ""}`}>{isIncome ? "+" : "−"}{formatMoney(transaction.amountCents)}</span>{!readOnly && <div className="flex items-center gap-1"><IconButton size="sm" icon="edit" label={`编辑${transaction.note || transaction.category.name}`} onPress={() => setEditing(transaction)} /><IconButton size="sm" icon="trash" label={`删除${transaction.note || transaction.category.name}`} className="text-muted hover:text-danger" isDisabled={Boolean(deletingId)} onPress={() => setPendingDelete(transaction)} /></div>}</div>
+                    <div className="flex min-w-0 items-center gap-3"><span className="category-symbol" style={{ color: isIncome ? "var(--success)" : palette.color, background: isIncome ? "var(--success-soft)" : palette.surface }}><CategoryIcon categoryName={transaction.category.name} type={transaction.type} icon={transaction.category.icon} size={18} /></span><div className="transaction-copy"><strong title={transaction.note || transaction.category.name}>{transaction.note || transaction.category.name}</strong><p>{transaction.category.name}{transaction.source === "SUBSCRIPTION" ? ` · 自动记录${transaction.subscription?.name ? ` / ${transaction.subscription.name}` : ""}` : " · 手动记录"}</p>{transaction.reimbursedAt && <Chip size="sm" color="success" variant="soft" className="mt-1"><Chip.Label>已报销</Chip.Label></Chip>}</div></div>
+                    <div className="flex shrink-0 flex-col items-end gap-1 sm:flex-row sm:items-center sm:gap-6"><span className={`transaction-value ${isIncome ? "text-success" : ""} ${transaction.reimbursedAt ? "text-muted line-through" : ""}`}>{isIncome ? "+" : "−"}{formatMoney(transaction.amountCents)}</span>{!readOnly && <div className="flex items-center gap-1">{!isIncome && <IconButton size="sm" icon="wallet" label={`${transaction.reimbursedAt ? "撤销报销" : "报销"}${transaction.note || transaction.category.name}`} onPress={() => setReimbursing(transaction)} />}<IconButton size="sm" icon="edit" label={`编辑${transaction.note || transaction.category.name}`} onPress={() => setEditing(transaction)} /><IconButton size="sm" icon="trash" label={`删除${transaction.note || transaction.category.name}`} className="text-muted hover:text-danger" isDisabled={Boolean(deletingId)} onPress={() => setPendingDelete(transaction)} /></div>}</div>
                   </div>;
                 })}
               </Card>
@@ -256,6 +262,7 @@ export default function TransactionsPage() {
         )}
       </div>
       {(showForm || editing) && ready && !readOnly && <TransactionForm categories={categories} transaction={editing} defaultDate={defaultEntryDate} onClose={() => { setShowForm(false); setEditing(null); }} onSaved={() => { setShowForm(false); setEditing(null); reload(); }} />}
+      {reimbursing && ready && !readOnly && <ReimburseDialog transaction={reimbursing} onClose={() => setReimbursing(null)} onSaved={() => { setReimbursing(null); reload(); }} />}
       {pendingDelete && <ConfirmDialog title="删除这笔记录？" description={`「${pendingDelete.note || pendingDelete.category.name}」将从账本中移除。删除后 5 秒内可以撤销，月度统计也会同步更新。`} confirmLabel="删除记录" danger busy={Boolean(deletingId)} onConfirm={() => void remove(pendingDelete)} onClose={() => setPendingDelete(null)} />}
       {undoId && <Toast message="记录已删除" action="撤销" onAction={() => void undo()} />}
       {!undoId && message && <Toast message={message} />}

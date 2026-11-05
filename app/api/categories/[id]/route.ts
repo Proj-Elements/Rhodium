@@ -15,16 +15,16 @@ export async function PATCH(request: Request, { params }: Context) {
     const { id } = await params;
     const body = categoryPatchSchema.parse(await parseJsonBody(request));
     const response = await withLedgerWrite(async (tx) => {
-    const category = await tx.category.findUnique({ where: { id } });
-    if (!category) throw notFound("分类不存在");
-    if (category.isSystem && body.archived === true) return jsonError("系统分类不能停用", 400);
-    const updated = await tx.category.update({
-      where: { id },
-      data: {
-        ...(typeof body.name === "string" ? { name: body.name } : {}),
-        ...(body.icon !== undefined ? { icon: body.icon } : {}),
-        ...(typeof body.archived === "boolean" ? { archivedAt: body.archived ? new Date() : null } : {}),
-      },
+      const category = await tx.category.findUnique({ where: { id } });
+      if (!category) throw notFound("分类不存在");
+      if (category.isSystem && body.archived === true) return jsonError("系统分类不能停用", 400);
+      const updated = await tx.category.update({
+        where: { id },
+        data: {
+          ...(typeof body.name === "string" ? { name: body.name } : {}),
+          ...(body.icon !== undefined ? { icon: body.icon } : {}),
+          ...(typeof body.archived === "boolean" ? { archivedAt: body.archived ? new Date() : null } : {}),
+        },
     });
     return NextResponse.json({ category: serializeCategory(updated) });
     });

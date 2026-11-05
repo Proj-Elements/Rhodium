@@ -9,7 +9,8 @@ FROM base AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
-RUN npm ci && npx prisma generate
+# The license initializer runs explicitly with a secret in the builder stage.
+RUN npm ci --ignore-scripts && npx prisma generate
 
 FROM base AS builder
 WORKDIR /app

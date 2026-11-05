@@ -270,6 +270,9 @@ export async function POST(request: Request) {
 
       const prepared = normalizedRows.map((row) => {
         const wantedType = row.type === TransactionType.EXPENSE ? CategoryType.EXPENSE : CategoryType.INCOME;
+        // Soft deletion preserves accounting facts; a later restore must not
+        // turn a reimbursed expense back into budget consumption.
+        const reimbursedAt = row.type === TransactionType.EXPENSE ? row.reimbursedAt : null;
         const mappedCategoryId = row.categoryId ? idMap.categories.get(row.categoryId) ?? row.categoryId : null;
         const category =
           usableFor(mappedCategoryId ? byId.get(mappedCategoryId) : undefined, wantedType, restoringBackup) ??
@@ -299,6 +302,7 @@ export async function POST(request: Request) {
           subscriptionMonth,
           subscriptionOccurrenceKey: occurrenceKey,
           deletedAt: row.deletedAt,
+          reimbursedAt,
         };
         return { data, externalId: restoringBackup ? row.externalId : null };
       });

@@ -13,6 +13,7 @@ export type NormalizedRow = {
   subscriptionMonth: Date | null;
   subscriptionOccurrenceKey: string | null;
   deletedAt: Date | null;
+  reimbursedAt: Date | null;
   externalId: string | null;
 };
 
@@ -119,6 +120,7 @@ export function normalizeRow(row: Row): NormalizedRow {
     subscriptionMonth: optionalDate(row.subscriptionMonth, "订阅月份"),
     subscriptionOccurrenceKey: typeof row.subscriptionOccurrenceKey === "string" && row.subscriptionOccurrenceKey.trim() ? row.subscriptionOccurrenceKey.trim() : null,
     deletedAt: optionalDateTime(row.deletedAt, "删除时间"),
+    reimbursedAt: optionalDateTime(row.reimbursedAt ?? row["报销时间"], "报销时间"),
     externalId: typeof row.id === "string" && row.id.trim() ? row.id.trim() : null,
   };
 }
@@ -135,4 +137,5 @@ export function validateRowShallow(row: Row): void {
   if (rawAmount === undefined || rawAmount === null || rawAmount === "") parseCents(row.amountCents, "金额");
   else parseAmountToCents(rawAmount);
   parseTransactionType(value(row, "type", "类型"));
+  optionalDateTime(row.reimbursedAt ?? row["报销时间"], "报销时间");
 }

@@ -31,11 +31,18 @@ export async function GET(request: Request) {
     const chartDayCount = Math.floor((focusDate.getTime() - chartStart.getTime()) / 86_400_000) + 1;
 
     const monthTxWhere = { deletedAt: null as null, occurredOn: { gte: start, lt: nextStart } };
-    const [budget, expense, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups, categories, settlement] = await Promise.all([
+    // 报销的支出不占预算：支出合计排除它们，报销额与笔数单独聚合。
+    const monthExpenseWhere = { ...monthTxWhere, type: TransactionType.EXPENSE };
+    const [budget, expense, reimbursed, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups, categories, settlement] = await Promise.all([
       resolveBudget(month),
       prisma.transaction.aggregate({
-        where: { ...monthTxWhere, type: TransactionType.EXPENSE },
+        where: { ...monthExpenseWhere, reimbursedAt: null },
         _sum: { amountCents: true },
+      }),
+      prisma.transaction.aggregate({
+        where: { ...monthExpenseWhere, reimbursedAt: { not: null } },
+        _sum: { amountCents: true },
+        _count: { _all: true },
       }),
       prisma.transaction.aggregate({
         where: { ...monthTxWhere, type: TransactionType.INCOME },
@@ -55,9 +62,10 @@ export async function GET(request: Request) {
       }),
       // Grouping by category through the relation avoids the follow-up
       // category.findMany that used to run after this batch.
+      // 分类排行只统计未报销的支出：报销的那笔钱已经回来了。
       prisma.transaction.groupBy({
         by: ["categoryId"],
-        where: { ...monthTxWhere, type: TransactionType.EXPENSE },
+        where: { ...monthExpenseWhere, reimbursedAt: null },
         _sum: { amountCents: true },
         orderBy: { _sum: { amountCents: "desc" } },
       }),
@@ -65,7 +73,7 @@ export async function GET(request: Request) {
       prisma.transaction.count({ where: { ...monthTxWhere, type: TransactionType.EXPENSE } }),
       prisma.transaction.groupBy({
         by: ["occurredOn"],
-        where: { type: TransactionType.EXPENSE, deletedAt: null, occurredOn: { gte: chartStart, lte: focusDate } },
+        where: { type: TransactionType.EXPENSE, deletedAt: null, reimbursedAt: null, occurredOn: { gte: chartStart, lte: focusDate } },
         _sum: { amountCents: true },
       }),
       prisma.transaction.groupBy({
@@ -92,13 +100,19 @@ export async function GET(request: Request) {
 
     const focusDateExpenseCents = focusGroups.find((group) => group.type === TransactionType.EXPENSE)?._sum.amountCents ?? 0;
     const focusDateIncomeCents = focusGroups.find((group) => group.type === TransactionType.INCOME)?._sum.amountCents ?? 0;
+    const reimbursedCents = reimbursed._sum.amountCents ?? 0;
     const settled = settlement !== null && settlement.reopenedAt === null;
     const budgetCents = settled
       ? settlement.remainingAmountCents === null
         ? null
         : settlement.budgetAmountCents
       : budget.amountCents;
-    const expenseCents = settled ? settlement.expenseAmountCents : expense._sum.amountCents ?? 0;
+    // Unlike monthly summaries, dashboard expenses are net of reimbursement.
+    const expenseCents = settled
+      ? settlement.remainingAmountCents === null
+        ? settlement.expenseAmountCents - reimbursedCents
+        : settlement.budgetAmountCents - settlement.remainingAmountCents
+      : expense._sum.amountCents ?? 0;
     const incomeCents = settled ? settlement.incomeAmountCents : income._sum.amountCents ?? 0;
     const remainingCents = settled ? settlement.remainingAmountCents : calculateRemaining(budgetCents, expenseCents);
     return NextResponse.json({
@@ -108,6 +122,9 @@ export async function GET(request: Request) {
       budget: budgetCents === null ? null : { amountCents: budgetCents },
       budgetSource: budget.source,
       expenseCents,
+      outOfPocketCents: expenseCents,
+      reimbursedCents,
+      reimbursedCount: reimbursed._count._all,
       incomeCents,
       remainingCents,
       usagePercent: calculateUsage(budgetCents, expenseCents),

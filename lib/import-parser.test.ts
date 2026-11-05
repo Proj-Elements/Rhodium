@@ -31,6 +31,14 @@ describe("import row normalization", () => {
     expect(row.amountCents).toBe(456);
   });
 
+  it("preserves reimbursement timestamps with either header spelling", () => {
+    const base = { occurredOn: "2025-09-01", amountCents: 456 };
+    const timestamp = "2025-09-02T08:00:00.000Z";
+    expect(normalizeRow({ ...base, reimbursedAt: timestamp }).reimbursedAt?.toISOString()).toBe(timestamp);
+    expect(normalizeRow({ ...base, 报销时间: timestamp }).reimbursedAt?.toISOString()).toBe(timestamp);
+    expect(normalizeRow(base).reimbursedAt).toBeNull();
+  });
+
   it("marks source as SUBSCRIPTION only with a resolvable subscription id", () => {
     expect(normalizeRow({ occurredOn: "2025-09-01", amount: "1", type: "expense", source: "订阅", subscriptionId: "s1" }).source).toBe("SUBSCRIPTION");
     expect(normalizeRow({ occurredOn: "2025-09-01", amount: "1", type: "expense", source: "订阅" }).source).toBe("MANUAL");
@@ -79,5 +87,11 @@ describe("import validation helpers", () => {
     expect(() => validateRowShallow({ occurredOn: "2025-09-01", amountCents: "2500" })).not.toThrow();
     expect(() => validateRowShallow({ occurredOn: "2025-09-01" })).toThrow("金额不能为空");
     expect(() => validateRowShallow({ occurredOn: "2025-09-01", amountCents: "1.5" })).toThrow();
+  });
+
+  it("rejects invalid reimbursement timestamps in both preview and import", () => {
+    const row = { occurredOn: "2025-09-01", amountCents: 456, reimbursedAt: "not-a-date" };
+    expect(() => normalizeRow(row)).toThrow("报销时间格式不正确");
+    expect(() => validateRowShallow(row)).toThrow("报销时间格式不正确");
   });
 });

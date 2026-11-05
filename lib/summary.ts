@@ -26,6 +26,7 @@ const SUMMARY_SELECT = {
   amountCents: true,
   type: true,
   source: true,
+  reimbursedAt: true,
   categoryId: true,
   category: { select: { name: true } },
 } as const;
@@ -35,6 +36,7 @@ type SummaryTransaction = {
   amountCents: number;
   type: TransactionType;
   source: string;
+  reimbursedAt: Date | null;
   categoryId: string;
   category: { name: string };
 };
@@ -52,6 +54,9 @@ function summarizeMonth(
   settlement: SummarySettlement | null,
 ) {
   let expenseCents = 0;
+  let outOfPocketCents = 0;
+  let reimbursedCents = 0;
+  let reimbursedCount = 0;
   let incomeCents = 0;
   let expenseTransactionCount = 0;
   let subscriptionExpenseCents = 0;
@@ -62,6 +67,9 @@ function summarizeMonth(
   for (const transaction of transactions) {
     const date = dateOnlyKey(transaction.occurredOn);
     const isIncome = transaction.type === TransactionType.INCOME;
+    // 报销的支出不占预算：计入 expenseCents（账面支出）但不算进自付，
+    // 余额/进度条走 outOfPocket。报销属于“回收”，不是收入。
+    const countsTowardBudget = !(transaction.type === TransactionType.EXPENSE && transaction.reimbursedAt);
 
     if (isIncome) {
       incomeCents += transaction.amountCents;
@@ -69,6 +77,12 @@ function summarizeMonth(
       expenseCents += transaction.amountCents;
       expenseTransactionCount += 1;
       if (transaction.source === "SUBSCRIPTION") subscriptionExpenseCents += transaction.amountCents;
+      if (countsTowardBudget) {
+        outOfPocketCents += transaction.amountCents;
+      } else {
+        reimbursedCents += transaction.amountCents;
+        reimbursedCount += 1;
+      }
       const category = byCategory.get(transaction.categoryId) ?? { name: transaction.category.name, amountCents: 0 };
       category.amountCents += transaction.amountCents;
       byCategory.set(transaction.categoryId, category);
@@ -95,7 +109,14 @@ function summarizeMonth(
     : budget.amountCents;
   const reportedExpenseCents = settled ? settlement.expenseAmountCents : expenseCents;
   const reportedIncomeCents = settled ? settlement.incomeAmountCents : incomeCents;
-  const remainingCents = settled ? settlement.remainingAmountCents : calculateRemaining(budgetCents, reportedExpenseCents);
+  // A snapshot stores gross expenses but net remaining. Recover its budget
+  // consumption without consulting a preset that may have changed since close.
+  const reportedOutOfPocketCents = settled
+    ? settlement.remainingAmountCents === null
+      ? settlement.expenseAmountCents - reimbursedCents
+      : settlement.budgetAmountCents - settlement.remainingAmountCents
+    : outOfPocketCents;
+  const remainingCents = settled ? settlement.remainingAmountCents : calculateRemaining(budgetCents, reportedOutOfPocketCents);
   const dailyBreakdown = Array.from({ length: daysInMonth(month) }, (_, index) => {
     const date = `${month}-${String(index + 1).padStart(2, "0")}`;
     return { date, ...(dailyByDate.get(date) ?? { expenseCents: 0, incomeCents: 0, transactionCount: 0 }) };
@@ -106,9 +127,12 @@ function summarizeMonth(
     budgetCents,
     budgetSource: budget.source,
     expenseCents: reportedExpenseCents,
+    outOfPocketCents: reportedOutOfPocketCents,
+    reimbursedCents,
+    reimbursedCount,
     incomeCents: reportedIncomeCents,
     remainingCents,
-    dailyAverageCents: expenseTransactionCount ? Math.round(expenseCents / Math.max(1, elapsedDays)) : 0,
+    dailyAverageCents: reportedOutOfPocketCents ? Math.round(reportedOutOfPocketCents / Math.max(1, elapsedDays)) : 0,
     dailyBreakdown,
     topCategory,
     topDate: topDate ? { date: topDate[0], amountCents: topDate[1] } : null,

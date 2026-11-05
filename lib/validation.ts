@@ -65,6 +65,21 @@ export const transactionRestoreSchema = z
   .object({ restore: z.literal(true) })
   .strict();
 
+/**
+ * Reimburse-only PATCH body ({ reimburse: true }). Strict like the restore
+ * body so extra fields cannot ride along. Undoing a reimbursement has its own
+ * strict body too ({ unreimburse: true }) so it cannot be confused with an
+ * edit; a full edit still clears the stamp as before.
+ */
+export const transactionReimburseSchema = z
+  .object({ reimburse: z.literal(true) })
+  .strict();
+
+/** Un-reimburse-only PATCH body ({ unreimburse: true }). */
+export const transactionUnreimburseSchema = z
+  .object({ unreimburse: z.literal(true) })
+  .strict();
+
 export const categorySchema = z.object({
   name: z.string().trim().min(1).max(30),
   type: z.enum(["expense", "income", "both"]).default("expense"),
@@ -139,6 +154,21 @@ const backupSettlementSchema = z.object({
   reopenedAt: z.string().optional().nullable(),
 });
 
+const backupTransactionSchema = z.object({
+  id: backupIdValue,
+  type: z.string().optional(),
+  amountCents: z.union([z.number(), z.string()]),
+  occurredOn: z.string(),
+  categoryId: backupIdValue,
+  note: z.string().max(200).optional().nullable(),
+  source: z.string().optional(),
+  subscriptionId: backupIdValue.optional().nullable(),
+  subscriptionMonth: z.string().optional().nullable(),
+  subscriptionOccurrenceKey: z.string().optional().nullable(),
+  deletedAt: z.string().optional().nullable(),
+  reimbursedAt: z.string().optional().nullable(),
+});
+
 export const backupSchema = z.object({
   version: z.union([z.number(), z.string()]).optional(),
   exportedAt: z.string().optional(),
@@ -150,6 +180,8 @@ export const backupSchema = z.object({
   budgetPreset: z.object({ amountCents: z.number().int().min(0).max(2_000_000_000) }).nullable().optional(),
   budgets: boundedArray(backupBudgetSchema, 1200).optional(),
   settlements: boundedArray(backupSettlementSchema, 1200).optional(),
+  // Only the row batch is executed; the archive remains bounded by the 8 MB body limit.
+  transactions: z.array(backupTransactionSchema).optional(),
 });
 
 export type BackupPayload = z.infer<typeof backupSchema>;

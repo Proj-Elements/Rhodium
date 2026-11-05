@@ -19,6 +19,9 @@ type Summary = {
   month: string;
   budgetCents: number | null;
   expenseCents: number;
+  outOfPocketCents: number;
+  reimbursedCents: number;
+  reimbursedCount: number;
   incomeCents: number;
   remainingCents: number | null;
   dailyAverageCents: number;
@@ -181,7 +184,7 @@ export default function SettlementsPage() {
     }
   }
 
-  const netCents = summary ? summary.incomeCents - summary.expenseCents : 0;
+  const netCents = summary ? summary.incomeCents - summary.outOfPocketCents : 0;
   const settledAt = summary?.settlement?.settledAt
     ? new Intl.DateTimeFormat("zh-CN", {
         month: "numeric",
@@ -218,10 +221,11 @@ export default function SettlementsPage() {
             <section className="grid grid-cols-2 gap-4 lg:grid-cols-4 reveal" aria-label="月度汇总">
               <MetricCard label="月度预算" value={summary.budgetCents === null ? "未设置" : formatMoney(summary.budgetCents)} detail="为生活设定的舒适范围" icon="target" />
               <MetricCard label="当月支出" value={formatMoney(summary.expenseCents)} detail={`${summary.expenseTransactionCount} 笔支出 · 日均 ${formatMoney(summary.dailyAverageCents)}`} icon="expense" />
-              <MetricCard label="预算余量" value={summary.remainingCents === null ? "—" : formatMoney(summary.remainingCents)} detail="月度预算减去总支出" icon="wallet" tone={summary.remainingCents !== null && summary.remainingCents < 0 ? "danger" : undefined} />
+              <MetricCard label="预算余量" value={summary.remainingCents === null ? "—" : formatMoney(summary.remainingCents)} detail="月度预算减去自付支出" icon="wallet" tone={summary.remainingCents !== null && summary.remainingCents < 0 ? "danger" : undefined} />
               <MetricCard label="当月净收支" value={`${netCents >= 0 ? "+" : "−"}${formatMoney(Math.abs(netCents))}`} detail={`总收入 ${formatMoney(summary.incomeCents)}`} icon="trend" tone={netCents > 0 ? "income" : undefined} />
             </section>
 
+            {summary.reimbursedCount > 0 && <p className="flex flex-wrap gap-x-4 gap-y-2 px-1 text-xs text-muted"><span>已报销 <strong className="font-medium tabular-nums text-success">{formatMoney(summary.reimbursedCents)} · {summary.reimbursedCount} 笔</strong></span><span>自付 <strong className="font-medium tabular-nums text-foreground">{formatMoney(summary.outOfPocketCents)}</strong></span><span>报销不计为收入，预算与收支差额按自付计算。</span></p>}
             <div className="grid items-start gap-5 lg:grid-cols-12 reveal reveal-delay-1">
               <Card className="panel lg:col-span-8"><div className="section-heading"><div><h2 className="section-title">生活的收支日历</h2><p className="section-description">颜色越深，代表当天的支出越多。</p></div><span className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted"><i className="size-1.5 rounded-full bg-success" />有收入</span></div><DailyCalendar key={month} month={month} days={summary.dailyBreakdown} /></Card>
               <div className="flex flex-col gap-5 lg:col-span-4">
