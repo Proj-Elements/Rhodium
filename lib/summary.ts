@@ -87,6 +87,15 @@ function summarizeMonth(
   const today = todayInShanghai();
   const currentMonth = today.slice(0, 7);
   const elapsedDays = month === currentMonth ? Number(today.slice(8, 10)) : daysInMonth(month);
+  const settled = settlement !== null && settlement.reopenedAt === null;
+  const budgetCents = settled
+    ? settlement.remainingAmountCents === null
+      ? null
+      : settlement.budgetAmountCents
+    : budget.amountCents;
+  const reportedExpenseCents = settled ? settlement.expenseAmountCents : expenseCents;
+  const reportedIncomeCents = settled ? settlement.incomeAmountCents : incomeCents;
+  const remainingCents = settled ? settlement.remainingAmountCents : calculateRemaining(budgetCents, reportedExpenseCents);
   const dailyBreakdown = Array.from({ length: daysInMonth(month) }, (_, index) => {
     const date = `${month}-${String(index + 1).padStart(2, "0")}`;
     return { date, ...(dailyByDate.get(date) ?? { expenseCents: 0, incomeCents: 0, transactionCount: 0 }) };
@@ -94,11 +103,11 @@ function summarizeMonth(
 
   return {
     month,
-    budgetCents: budget.amountCents,
+    budgetCents,
     budgetSource: budget.source,
-    expenseCents,
-    incomeCents,
-    remainingCents: calculateRemaining(budget.amountCents, expenseCents),
+    expenseCents: reportedExpenseCents,
+    incomeCents: reportedIncomeCents,
+    remainingCents,
     dailyAverageCents: expenseTransactionCount ? Math.round(expenseCents / Math.max(1, elapsedDays)) : 0,
     dailyBreakdown,
     topCategory,

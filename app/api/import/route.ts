@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { handleApiError, MAX_IMPORT_BODY_BYTES, parseJsonBody } from "@/lib/api";
-import { monthKey, monthStart } from "@/lib/domain";
+import { monthKey, monthStart, parseDateOnly } from "@/lib/domain";
 import {
   normalizeRow,
   parseBoolean,
@@ -224,12 +224,16 @@ export async function POST(request: Request) {
     // the targeted rows currently live in, so an update cannot silently mutate a
     // settled month by moving a row out of it.
     const targetMonths = normalizedRows.map((row) => monthKey(row.occurredOn));
+    const backupMonths = [
+      ...(body.backup?.budgets ?? []).map((row) => monthKey(parseDateOnly(row.month))),
+      ...(body.backup?.settlements ?? []).map((row) => monthKey(parseDateOnly(row.month))),
+    ];
     const existingMonths = externalIds.length
       ? (await prisma.transaction.findMany({ where: { id: { in: externalIds } }, select: { occurredOn: true } })).map((item) =>
           monthKey(item.occurredOn),
         )
       : [];
-    const lockedMonths = await getLockedMonths([...new Set([...targetMonths, ...existingMonths])]);
+    const lockedMonths = await getLockedMonths([...new Set([...targetMonths, ...existingMonths, ...backupMonths])]);
     if (lockedMonths.length) throw conflict(`${lockedMonths.sort().join("、")} 已结算，请先重新打开后再导入`);
 
     await ensureDefaultCategories();

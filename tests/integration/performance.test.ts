@@ -192,4 +192,35 @@ describe("POST /api/import", () => {
     expect((await response.json()).error).toContain("2024-05");
     expect(await prisma.transaction.count()).toBe(0);
   });
+
+  it("refuses backup-only budget and settlement updates to a settled month", async () => {
+    await prisma.monthlyBudget.create({ data: { month: monthStart("2024-05"), amountCents: 10_000 } });
+    await prisma.monthlySettlement.create({
+      data: {
+        month: monthStart("2024-05"),
+        budgetAmountCents: 10_000,
+        expenseAmountCents: 3_000,
+        incomeAmountCents: 0,
+        remainingAmountCents: 7_000,
+      },
+    });
+    const backup = {
+      version: 1,
+      budgets: [{ month: "2024-05-01", amountCents: 20_000 }],
+      settlements: [{
+        month: "2024-05-01",
+        budgetAmountCents: 20_000,
+        expenseAmountCents: 5_000,
+        incomeAmountCents: 0,
+        remainingAmountCents: 15_000,
+      }],
+    };
+
+    const response = await importRows(importRequest([], backup));
+
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toContain("2024-05");
+    expect((await prisma.monthlyBudget.findUniqueOrThrow({ where: { month: monthStart("2024-05") } })).amountCents).toBe(10_000);
+    expect((await prisma.monthlySettlement.findUniqueOrThrow({ where: { month: monthStart("2024-05") } })).expenseAmountCents).toBe(3_000);
+  });
 });

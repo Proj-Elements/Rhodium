@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     const chartDayCount = Math.floor((focusDate.getTime() - chartStart.getTime()) / 86_400_000) + 1;
 
     const monthTxWhere = { deletedAt: null as null, occurredOn: { gte: start, lt: nextStart } };
-    const [budget, expense, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups, categories] = await Promise.all([
+    const [budget, expense, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups, categories, settlement] = await Promise.all([
       resolveBudget(month),
       prisma.transaction.aggregate({
         where: { ...monthTxWhere, type: TransactionType.EXPENSE },
@@ -76,6 +76,7 @@ export async function GET(request: Request) {
       // Categories are a tiny table; loading them here avoids a second
       // sequential round trip once the expense grouping is known.
       prisma.category.findMany({ select: { id: true, name: true } }),
+      prisma.monthlySettlement.findUnique({ where: { month: start } }),
     ]);
 
     const categoryMap = new Map(categories.map((category) => [category.id, category.name]));
@@ -91,8 +92,15 @@ export async function GET(request: Request) {
 
     const focusDateExpenseCents = focusGroups.find((group) => group.type === TransactionType.EXPENSE)?._sum.amountCents ?? 0;
     const focusDateIncomeCents = focusGroups.find((group) => group.type === TransactionType.INCOME)?._sum.amountCents ?? 0;
-    const expenseCents = expense._sum.amountCents ?? 0;
-    const budgetCents = budget.amountCents;
+    const settled = settlement !== null && settlement.reopenedAt === null;
+    const budgetCents = settled
+      ? settlement.remainingAmountCents === null
+        ? null
+        : settlement.budgetAmountCents
+      : budget.amountCents;
+    const expenseCents = settled ? settlement.expenseAmountCents : expense._sum.amountCents ?? 0;
+    const incomeCents = settled ? settlement.incomeAmountCents : income._sum.amountCents ?? 0;
+    const remainingCents = settled ? settlement.remainingAmountCents : calculateRemaining(budgetCents, expenseCents);
     return NextResponse.json({
       month,
       today,
@@ -100,8 +108,8 @@ export async function GET(request: Request) {
       budget: budgetCents === null ? null : { amountCents: budgetCents },
       budgetSource: budget.source,
       expenseCents,
-      incomeCents: income._sum.amountCents ?? 0,
-      remainingCents: calculateRemaining(budgetCents, expenseCents),
+      incomeCents,
+      remainingCents,
       usagePercent: calculateUsage(budgetCents, expenseCents),
       focusDateExpenseCents,
       focusDateIncomeCents,

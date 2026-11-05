@@ -105,6 +105,50 @@ describe("getMonthSummary", () => {
     expect(summary.remainingCents).toBeNull();
   });
 
+  it("uses the captured amounts for a settled month instead of the current preset", async () => {
+    budgetPreset.mockResolvedValue({ id: 1, amountCents: 300_000 });
+    findTransactions.mockResolvedValue([row({ amountCents: 70_000, type: "EXPENSE" }), row({ amountCents: 10_000, type: "INCOME" })]);
+    findSettlement.mockResolvedValue({
+      id: "settlement-1",
+      month: new Date("2024-01-01T00:00:00.000Z"),
+      budgetAmountCents: 200_000,
+      expenseAmountCents: 50_000,
+      incomeAmountCents: 5_000,
+      remainingAmountCents: 150_000,
+      settledAt: new Date("2024-02-01T00:00:00.000Z"),
+      reopenedAt: null,
+    });
+
+    const summary = await getMonthSummary(MONTH);
+
+    expect(summary).toMatchObject({
+      budgetCents: 200_000,
+      expenseCents: 50_000,
+      incomeCents: 5_000,
+      remainingCents: 150_000,
+      settlement: { budgetAmountCents: 200_000, expenseAmountCents: 50_000, incomeAmountCents: 5_000 },
+    });
+  });
+
+  it("returns live values after a settlement has been reopened", async () => {
+    budgetPreset.mockResolvedValue({ id: 1, amountCents: 300_000 });
+    findTransactions.mockResolvedValue([row({ amountCents: 70_000 })]);
+    findSettlement.mockResolvedValue({
+      id: "settlement-1",
+      month: new Date("2024-01-01T00:00:00.000Z"),
+      budgetAmountCents: 200_000,
+      expenseAmountCents: 50_000,
+      incomeAmountCents: 5_000,
+      remainingAmountCents: 150_000,
+      settledAt: new Date("2024-02-01T00:00:00.000Z"),
+      reopenedAt: new Date("2024-02-02T00:00:00.000Z"),
+    });
+
+    const summary = await getMonthSummary(MONTH);
+
+    expect(summary).toMatchObject({ budgetCents: 300_000, expenseCents: 70_000, remainingCents: 230_000 });
+  });
+
   it("queries the month as a half-open range", async () => {
     await getMonthSummary(MONTH);
 

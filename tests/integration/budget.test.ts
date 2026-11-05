@@ -77,6 +77,22 @@ describe("settlement snapshot", () => {
     expect(payload.settlement.budgetAmountCents).toBe(200_000);
     expect(payload.settlement.remainingAmountCents).toBe(170_000);
   });
+
+  it("keeps settled summary and dashboard amounts frozen when the preset changes", async () => {
+    const category = await createCategory();
+    await setBudgetPreset(200_000);
+    await addTransaction({ categoryId: category.id, date: `${MONTH}-05`, amountCents: 30_000 });
+    await settleMonth(new Request(`http://localhost/api/settlements/${MONTH}/settle`, { method: "POST" }), routeContext({ month: MONTH }));
+
+    await setBudgetPreset(300_000);
+
+    const summary = await getMonthSummary(MONTH);
+    expect(summary).toMatchObject({ budgetCents: 200_000, expenseCents: 30_000, remainingCents: 170_000 });
+
+    const response = await getDashboard(new Request(`http://localhost/api/dashboard?month=${MONTH}`));
+    const payload = (await response.json()) as { budget: { amountCents: number } | null; expenseCents: number; remainingCents: number | null };
+    expect(payload).toMatchObject({ budget: { amountCents: 200_000 }, expenseCents: 30_000, remainingCents: 170_000 });
+  });
 });
 
 describe("dashboard budget", () => {
