@@ -1,10 +1,12 @@
 import { CategoryType } from "@prisma/client";
 import { beforeEach, describe, expect, it } from "vitest";
 import { GET as listTransactions, POST as createTransaction } from "@/app/api/transactions/route";
-import { DELETE as deleteTransaction, PATCH as patchTransaction } from "@/app/api/transactions/[id]/route";
+import { DELETE as deleteTransactionRoute, PATCH as patchTransactionRoute } from "@/app/api/transactions/[id]/route";
 import { POST as createSubscription } from "@/app/api/subscriptions/route";
 import { PATCH as patchSubscription } from "@/app/api/subscriptions/[id]/route";
 import { monthStart } from "@/lib/domain";
+import { initialBillingHistory } from "@/lib/billing-history";
+import { subscriptionPlanData } from "@/lib/subscriptions";
 import { addTransaction, createCategory, prisma, resetDatabase, routeContext } from "./helpers";
 
 function jsonRequest(url: string, method: string, body: unknown) {
@@ -13,6 +15,21 @@ function jsonRequest(url: string, method: string, body: unknown) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+async function patchTransaction(request: Request, context: Parameters<typeof patchTransactionRoute>[1]) {
+  const { id } = await context.params;
+  const current = await prisma.transaction.findUnique({ where: { id } });
+  const body = await request.json() as Record<string, unknown>;
+  return patchTransactionRoute(jsonRequest(request.url, "PATCH", { expectedVersion: current?.version ?? 1, ...body }), context);
+}
+
+async function deleteTransaction(request: Request, context: Parameters<typeof deleteTransactionRoute>[1]) {
+  const { id } = await context.params;
+  const current = await prisma.transaction.findUnique({ where: { id } });
+  const url = new URL(request.url);
+  url.searchParams.set("expectedVersion", String(current?.version ?? 1));
+  return deleteTransactionRoute(new Request(url, { method: "DELETE" }), context);
 }
 
 /** Lock a month the way a settlement does: settled and not reopened. */
@@ -182,15 +199,13 @@ describe("subscription category validation", () => {
   it("applies the same guard on update", async () => {
     const expense = await createCategory("订阅", CategoryType.EXPENSE);
     const income = await createCategory("工资", CategoryType.INCOME);
-    const subscription = await prisma.subscription.create({
-      data: {
-        name: "视频会员",
-        amountCents: 2500,
-        billingDay: 8,
-        categoryId: expense.id,
-        startMonth: new Date("2024-03-01T00:00:00.000Z"),
-      },
-    });
+    const subscriptionData = {
+      name: "视频会员", amountCents: 2500, billingDay: 8, categoryId: expense.id,
+      startMonth: new Date("2024-03-01T00:00:00.000Z"), endMonth: null, note: null,
+    };
+    const subscription = await prisma.subscription.create({ data: {
+      ...subscriptionData, billingHistory: initialBillingHistory(subscriptionPlanData(subscriptionData)),
+    } });
     const response = await patchSubscription(
       jsonRequest(`http://localhost/api/subscriptions/${subscription.id}`, "PATCH", payload(income.id)),
       routeContext({ id: subscription.id }),
@@ -329,11 +344,92 @@ describe("soft delete and restore", () => {
   });
 
   it("answers 404 for an unknown id instead of leaking a Prisma error", async () => {
-    const response = await patchTransaction(
+    const response = await patchTransactionRoute(
       jsonRequest("http://localhost/api/transactions/missing", "PATCH", { restore: true }),
       routeContext({ id: "missing" }),
     );
     expect(response.status).toBe(404);
     expect(await response.json()).toMatchObject({ error: "账目不存在" });
+  });
+});
+
+describe("transaction optimistic concurrency", () => {
+  it("rejects a stale edit after another tab saves without losing either amount or note", async () => {
+    const category = await createCategory();
+    const original = await addTransaction({ categoryId: category.id, date: "2024-03-10", amountCents: 1000 });
+    const body = { type: "expense", amount: "20", occurredOn: "2024-03-10", categoryId: category.id, expectedVersion: original.version };
+    const saved = await patchTransactionRoute(
+      jsonRequest(`http://localhost/api/transactions/${original.id}`, "PATCH", { ...body, note: "第一个标签页" }),
+      routeContext({ id: original.id }),
+    );
+    expect(saved.status).toBe(200);
+    expect((await saved.json()).transaction.version).toBe(original.version + 1);
+    const stale = await patchTransactionRoute(
+      jsonRequest(`http://localhost/api/transactions/${original.id}`, "PATCH", { ...body, amount: "30", note: "旧标签页" }),
+      routeContext({ id: original.id }),
+    );
+    expect(stale.status).toBe(409);
+    expect(await prisma.transaction.findUniqueOrThrow({ where: { id: original.id } })).toMatchObject({
+      amountCents: 2000, note: "第一个标签页", version: original.version + 1,
+    });
+  });
+
+  it("rejects stale delete and reimbursement actions without mutating the saved row", async () => {
+    const category = await createCategory();
+    const original = await addTransaction({ categoryId: category.id, date: "2024-03-10", amountCents: 1000 });
+    const saved = await patchTransactionRoute(
+      jsonRequest(`http://localhost/api/transactions/${original.id}`, "PATCH", { reimburse: true, expectedVersion: original.version }),
+      routeContext({ id: original.id }),
+    );
+    expect(saved.status).toBe(200);
+    const reimbursed = await prisma.transaction.findUniqueOrThrow({ where: { id: original.id } });
+    const staleAction = await patchTransactionRoute(
+      jsonRequest(`http://localhost/api/transactions/${original.id}`, "PATCH", { unreimburse: true, expectedVersion: original.version }),
+      routeContext({ id: original.id }),
+    );
+    const staleDelete = await deleteTransactionRoute(
+      new Request(`http://localhost/api/transactions/${original.id}?expectedVersion=${original.version}`, { method: "DELETE" }),
+      routeContext({ id: original.id }),
+    );
+    expect(staleAction.status).toBe(409);
+    expect(staleDelete.status).toBe(409);
+    expect(await prisma.transaction.findUniqueOrThrow({ where: { id: original.id } })).toEqual(reimbursed);
+  });
+
+  it("requires a version on ordinary edits, actions and deletes", async () => {
+    const category = await createCategory();
+    const original = await addTransaction({ categoryId: category.id, date: "2024-03-10", amountCents: 1000 });
+    for (const body of [
+      { type: "expense", amount: "20", occurredOn: "2024-03-10", categoryId: category.id },
+      { reimburse: true },
+      { unreimburse: true },
+      { restore: true },
+    ]) {
+      expect((await patchTransactionRoute(
+        jsonRequest(`http://localhost/api/transactions/${original.id}`, "PATCH", body),
+        routeContext({ id: original.id }),
+      )).status).toBe(400);
+    }
+    expect((await deleteTransactionRoute(
+      new Request(`http://localhost/api/transactions/${original.id}`, { method: "DELETE" }),
+      routeContext({ id: original.id }),
+    )).status).toBe(400);
+    expect(await prisma.transaction.findUniqueOrThrow({ where: { id: original.id } })).toEqual(original);
+  });
+
+  it("rejects restore combined with a full edit on either a live or deleted row", async () => {
+    const category = await createCategory();
+    const original = await addTransaction({ categoryId: category.id, date: "2024-03-10", amountCents: 1000 });
+    for (const deleted of [false, true]) {
+      if (deleted) await prisma.transaction.update({ where: { id: original.id }, data: { deletedAt: new Date() } });
+      const response = await patchTransactionRoute(
+        jsonRequest(`http://localhost/api/transactions/${original.id}`, "PATCH", {
+          restore: true, type: "expense", amount: "20", occurredOn: "2024-03-10", categoryId: category.id, expectedVersion: original.version,
+        }),
+        routeContext({ id: original.id }),
+      );
+      expect(response.status).toBe(400);
+      expect((await prisma.transaction.findUniqueOrThrow({ where: { id: original.id } })).amountCents).toBe(1000);
+    }
   });
 });

@@ -3,9 +3,12 @@ import {
   normalizeRow,
   parseAmountToCents,
   parseBoolean,
+  parseCategoryType,
   parseCents,
+  parseMonthValue,
   parseSignedCents,
   parseTransactionType,
+  optionalDateTime,
   validateRowShallow,
 } from "@/lib/import-parser";
 
@@ -64,6 +67,15 @@ describe("import validation helpers", () => {
     expect(() => parseSignedCents("abc", "金额")).toThrow("格式不正确");
   });
 
+  it.each(["0x10", "1e3", "1,2,3", "1,00", "Infinity"])("rejects ambiguous decimal amounts: %s", (amount) => {
+    expect(() => parseAmountToCents(amount)).toThrow();
+  });
+
+  it.each(["0x10", "1e3", "1,000", "1,2", "", null, undefined, true, "1.0"])("only accepts decimal integer cents: %s", (amount) => {
+    expect(() => parseCents(amount, "金额")).toThrow();
+    expect(() => parseSignedCents(amount, "金额")).toThrow();
+  });
+
   it("parses booleans and transaction types leniently", () => {
     expect(parseBoolean("true", false)).toBe(true);
     expect(parseBoolean("0", true)).toBe(false);
@@ -72,6 +84,9 @@ describe("import validation helpers", () => {
     expect(parseTransactionType("income")).toBe("INCOME");
     expect(parseTransactionType("")).toBe("EXPENSE");
     expect(() => parseTransactionType("报销")).toThrow("类型只能是支出或收入");
+    expect(() => parseTransactionType("伪造支出类型")).toThrow();
+    expect(() => parseCategoryType("UNKNOWN")).toThrow();
+    expect(() => parseBoolean("maybe", true)).toThrow();
   });
 
   it("keeps per-row limits while accepting the signed Int settlement boundaries", () => {
@@ -101,5 +116,43 @@ describe("import validation helpers", () => {
     const row = { occurredOn: "2025-09-01", amountCents: 456, reimbursedAt: "not-a-date" };
     expect(() => normalizeRow(row)).toThrow("报销时间格式不正确");
     expect(() => validateRowShallow(row)).toThrow("报销时间格式不正确");
+  });
+
+  it.each(["2025-09-02", "2025-09-02 08:00:00", "2025-02-30T08:00:00Z", "2025-09-02T24:00:00Z", "2025-09-02T08:60:00Z"])("requires a real ISO timestamp with a timezone: %s", (timestamp) => {
+    expect(() => optionalDateTime(timestamp, "时间")).toThrow("时间格式不正确");
+  });
+
+  it("accepts ISO timestamps with explicit offsets", () => {
+    expect(optionalDateTime("2025-09-02T08:00:00+08:00", "时间")?.toISOString()).toBe("2025-09-02T00:00:00.000Z");
+  });
+
+  it("requires subscription and metadata months to be exact month values", () => {
+    expect(parseMonthValue("2025-09", "月份").toISOString()).toBe("2025-09-01T00:00:00.000Z");
+    expect(parseMonthValue("2025-09-01", "月份").toISOString()).toBe("2025-09-01T00:00:00.000Z");
+    expect(() => parseMonthValue("2025-09-02", "月份")).toThrow();
+    expect(() => parseMonthValue("2025-09junk", "月份")).toThrow();
+    expect(() => normalizeRow({ occurredOn: "2025-09-01", amountCents: 100, subscriptionMonth: "2025-09-02" })).toThrow("月初日期");
+    expect(() => validateRowShallow({ occurredOn: "2025-09-01", amountCents: 100, deletedAt: "2025-09-02" })).toThrow("删除时间");
+  });
+
+  it("preserves historical note text and timestamps only when restoring a backup", () => {
+    const input = {
+      occurredOn: "2025-09-01", amountCents: 100, note: `  ${"测".repeat(201)}\n`,
+      createdAt: "2025-09-01T00:00:00.000Z", updatedAt: "2025-09-03T10:00:00.000Z", version: 4,
+    };
+    const restored = normalizeRow(input, true);
+    expect(restored.note).toBe(input.note);
+    expect(restored.createdAt?.toISOString()).toBe(input.createdAt);
+    expect(restored.updatedAt?.toISOString()).toBe(input.updatedAt);
+    expect(restored.version).toBe(4);
+    expect(() => normalizeRow(input)).toThrow("备注不能超过 200 字");
+    const ordinary = normalizeRow({ ...input, note: "  text  " });
+    expect(ordinary).toMatchObject({ note: "text", createdAt: null, updatedAt: null, version: null });
+  });
+
+  it("rejects inconsistent historical timestamps or transaction versions in preview too", () => {
+    const input = { occurredOn: "2025-09-01", amountCents: 100, createdAt: "2025-09-03T00:00:00.000Z", updatedAt: "2025-09-01T00:00:00.000Z" };
+    expect(() => validateRowShallow(input, true)).toThrow("更新时间不能早于创建时间");
+    expect(() => validateRowShallow({ ...input, updatedAt: input.createdAt, version: 0 }, true)).toThrow("版本必须是正整数");
   });
 });

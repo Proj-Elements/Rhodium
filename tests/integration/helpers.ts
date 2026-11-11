@@ -5,7 +5,7 @@ import { resetSeedCache } from "@/lib/seed";
 import { resetSubscriptionSyncCache } from "@/lib/subscriptions";
 import { assertTestDatabaseIdentity, requireTestDatabase, type TestDatabaseIdentity } from "@/lib/test-database";
 
-const TABLES = ["Transaction", "Subscription", "MonthlyBudget", "BudgetPreset", "MonthlySettlement", "Category"]
+const TABLES = ["CreationRequest", "TransactionHistory", "SettlementHistory", "Transaction", "Subscription", "MonthlyBudget", "BudgetPreset", "MonthlySettlement", "Category"]
   .map((table) => `"public"."${table}"`)
   .join(", ");
 

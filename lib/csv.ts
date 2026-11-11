@@ -15,22 +15,40 @@
  * The previous version additionally required the value to contain `= + @` or a
  * `name(` call, which let payloads like "-cmd|' /C calc'!A0" and "-1-1" through.
  */
-const ALWAYS_UNSAFE_PREFIX = /^[=+@\t\r]/;
+const ALWAYS_UNSAFE_PREFIX = /^[=+@\t\r\n]/;
 const PLAIN_NUMBER = /^-?\d+(?:\.\d+)?$/;
+export const CSV_ENCODING_HEADER = "__rhodium_csv_encoding";
+const CSV_ENCODING = "apostrophe-v1";
 
-function neutralizeFormula(value: string): string {
-  if (ALWAYS_UNSAFE_PREFIX.test(value)) return `'${value}`;
-  if (value.startsWith("-") && !PLAIN_NUMBER.test(value)) return `'${value}`;
-  return value;
+function needsFormulaEscape(value: string): boolean {
+  const candidate = value.trimStart();
+  return ALWAYS_UNSAFE_PREFIX.test(value) || /^[=+@]/.test(candidate) ||
+    (candidate.startsWith("-") && !PLAIN_NUMBER.test(candidate));
 }
 
 export function csvEscape(value: unknown): string {
-  const text = neutralizeFormula(String(value ?? ""));
+  const raw = String(value ?? "");
+  const text = needsFormulaEscape(raw) ? `'${raw}` : raw;
   return `"${text.replaceAll('"', '""')}"`;
 }
 
+function reversibleEscape(value: unknown): string {
+  const raw = String(value ?? "");
+  const text = raw.startsWith("'") || needsFormulaEscape(raw) ? `'${raw}` : raw;
+  return `"${text.replaceAll('"', '""')}"`;
+}
+
+/** Export an explicitly marked format so formula escaping remains reversible. */
 export function toCsv(headers: string[], rows: unknown[][]): string {
-  const lines = [headers.map(csvEscape).join(","), ...rows.map((row) => row.map(csvEscape).join(","))];
+  if (headers.includes(CSV_ENCODING_HEADER)) throw new Error("CSV 表头使用了保留字段");
+  if (headers.some((header) => !header.trim()) || new Set(headers.map((header) => header.trim())).size !== headers.length) {
+    throw new Error("CSV 表头不能为空或重复");
+  }
+  const lines = [[...headers.map(reversibleEscape), csvEscape(CSV_ENCODING_HEADER)].join(",")];
+  for (const row of rows) {
+    if (row.length !== headers.length) throw new Error("CSV 数据列数与表头不一致");
+    lines.push([...row.map(reversibleEscape), csvEscape(CSV_ENCODING)].join(","));
+  }
   return `\uFEFF${lines.join("\r\n")}`;
 }
 
@@ -44,46 +62,65 @@ export function parseCsv(text: string): Record<string, string>[] {
   const rows: string[][] = [];
   let currentRow: string[] = [];
   let currentField = "";
-  let inQuotes = false;
+  let state: "start" | "unquoted" | "quoted" | "closed" = "start";
+  let rowHasContent = false;
 
   for (let index = 0; index < clean.length; index += 1) {
     const char = clean[index];
-    if (inQuotes) {
+    if (state === "quoted") {
       if (char === '"') {
         if (clean[index + 1] === '"') {
           currentField += '"';
           index += 1;
         } else {
-          inQuotes = false;
+          state = "closed";
         }
       } else {
         currentField += char;
       }
       continue;
     }
-    if (char === '"') {
-      inQuotes = true;
-    } else if (char === ",") {
+    if (char === ",") {
       currentRow.push(currentField);
       currentField = "";
+      state = "start";
+      rowHasContent = true;
     } else if (char === "\n" || char === "\r") {
       if (char === "\r" && clean[index + 1] === "\n") index += 1;
       currentRow.push(currentField);
       currentField = "";
-      rows.push(currentRow);
+      if (rowHasContent) rows.push(currentRow);
       currentRow = [];
+      state = "start";
+      rowHasContent = false;
     } else {
-      currentField += char;
+      if (state === "closed") throw new Error("CSV 闭合引号后只能有分隔符或换行");
+      if (char === '"') {
+        if (state !== "start") throw new Error("CSV 引号必须位于字段开头");
+        state = "quoted";
+      } else {
+        currentField += char;
+        state = "unquoted";
+      }
+      rowHasContent = true;
     }
   }
-  // Final field/row when the file does not end with a newline.
-  if (currentField !== "" || currentRow.length) {
+  if (state === "quoted") throw new Error("CSV 存在未闭合的引号");
+  if (rowHasContent) {
     currentRow.push(currentField);
     rows.push(currentRow);
   }
 
-  const nonEmpty = rows.filter((row) => row.some((field) => field.trim() !== ""));
-  if (nonEmpty.length < 2) return [];
-  const headers = nonEmpty[0];
-  return nonEmpty.slice(1).map((row) => Object.fromEntries(headers.map((header, i) => [header.trim(), row[i] ?? ""])));
+  if (!rows.length) return [];
+  const marked = rows[0][rows[0].length - 1] === CSV_ENCODING_HEADER;
+  const decode = (field: string) => marked && field.startsWith("'") ? field.slice(1) : field;
+  const headers = rows[0].map((header, index) => index === rows[0].length - 1 && marked ? header : decode(header).trim());
+  if (headers.some((header) => !header)) throw new Error("CSV 表头不能为空");
+  if (new Set(headers).size !== headers.length) throw new Error("CSV 包含重复表头");
+  if (!marked && headers.includes(CSV_ENCODING_HEADER)) throw new Error("CSV 编码标记必须是最后一列");
+  return rows.slice(1).map((row, index) => {
+    if (row.length !== headers.length) throw new Error(`CSV 第 ${index + 2} 行列数与表头不一致`);
+    if (marked && row[row.length - 1] !== CSV_ENCODING) throw new Error(`CSV 第 ${index + 2} 行编码标记无效`);
+    return Object.fromEntries(headers.slice(0, marked ? -1 : undefined).map((header, fieldIndex) => [header, decode(row[fieldIndex])]));
+  });
 }

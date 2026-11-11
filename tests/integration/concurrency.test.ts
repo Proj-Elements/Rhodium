@@ -9,7 +9,8 @@ import { POST as createSubscription } from "@/app/api/subscriptions/route";
 import { DELETE as deleteSubscription, PATCH as patchSubscription } from "@/app/api/subscriptions/[id]/route";
 import { monthStart, todayInShanghai } from "@/lib/domain";
 import { getMonthSummary } from "@/lib/summary";
-import { syncSubscriptions } from "@/lib/subscriptions";
+import { subscriptionPlanData, syncSubscriptions } from "@/lib/subscriptions";
+import { initialBillingHistory } from "@/lib/billing-history";
 import { addTransaction, createCategory, prisma, resetDatabase, routeContext } from "./helpers";
 
 function deferred() {
@@ -107,13 +108,15 @@ describe("ledger write serialization", () => {
       const writing = operation === "create"
         ? createTransaction(request("/api/transactions", "POST", body))
         : operation === "delete"
-          ? deleteTransaction(request(`/api/transactions/${row.id}`, "DELETE"), routeContext({ id: row.id }))
+          ? deleteTransaction(request(`/api/transactions/${row.id}?expectedVersion=${original.version}`, "DELETE"), routeContext({ id: row.id }))
           : operation === "import"
             ? importLedger(request("/api/import", "POST", { format: "json", rows: [body] }))
             : operation === "budget"
               ? putBudget(request("/api/budgets/2024-05", "PUT", { amount: "20" }), routeContext({ month: "2024-05" }))
               : patchTransaction(request(`/api/transactions/${row.id}`, "PATCH",
-                ["restore", "reimburse", "unreimburse"].includes(operation) ? { [operation]: true } : body), routeContext({ id: row.id }));
+                ["restore", "reimburse", "unreimburse"].includes(operation)
+                  ? { [operation]: true, expectedVersion: original.version }
+                  : { ...body, expectedVersion: original.version }), routeContext({ id: row.id }));
       await releaseWhenContenderStarts(writing, resume.resolve);
       const [settled, rejected] = await Promise.all([settling, writing]);
       expect(settled.status).toBe(200);
@@ -137,7 +140,7 @@ describe("ledger write serialization", () => {
       }
       return next(params);
     };
-    const writing = patchTransaction(request(`/api/transactions/${row.id}`, "PATCH", { reimburse: true }), routeContext({ id: row.id }));
+    const writing = patchTransaction(request(`/api/transactions/${row.id}`, "PATCH", { reimburse: true, expectedVersion: row.version }), routeContext({ id: row.id }));
     await paused.promise;
     lockAttempt = deferred();
     const settling = settleMonth(request("/api/settlements/2024-05/settle", "POST"), routeContext({ month: "2024-05" }));
@@ -151,8 +154,11 @@ describe("ledger write serialization", () => {
   it("finishes an active sync before a pause can report success", async () => {
     const category = await createCategory();
     const month = todayInShanghai().slice(0, 7);
+    const subscriptionData = {
+      name: "网盘", categoryId: category.id, amountCents: 1_000, billingDay: 1, startMonth: monthStart(month), endMonth: null, note: null,
+    };
     const subscription = await prisma.subscription.create({ data: {
-      name: "网盘", categoryId: category.id, amountCents: 1_000, billingDay: 1, startMonth: monthStart(month),
+      ...subscriptionData, billingHistory: initialBillingHistory(subscriptionPlanData(subscriptionData)),
     } });
     const paused = deferred();
     const resume = deferred();
@@ -185,8 +191,11 @@ describe("ledger write serialization", () => {
   it("does not detach a new occurrence between subscription usage-count and delete", async () => {
     const category = await createCategory();
     const month = todayInShanghai().slice(0, 7);
+    const subscriptionData = {
+      name: "音乐", categoryId: category.id, amountCents: 1_000, billingDay: 1, startMonth: monthStart(month), endMonth: null, note: null,
+    };
     const subscription = await prisma.subscription.create({ data: {
-      name: "音乐", categoryId: category.id, amountCents: 1_000, billingDay: 1, startMonth: monthStart(month),
+      ...subscriptionData, billingHistory: initialBillingHistory(subscriptionPlanData(subscriptionData)),
     } });
     const paused = deferred();
     const resume = deferred();

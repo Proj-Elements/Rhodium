@@ -4,6 +4,18 @@ import { prisma } from "@/lib/prisma";
 export type LedgerTransaction = Prisma.TransactionClient;
 export type LedgerWriteOptions = { maxWait?: number; timeout?: number };
 
+/** Read related ledger values from one stable PostgreSQL snapshot. */
+export function withLedgerRead<T>(work: (tx: LedgerTransaction) => Promise<T>): Promise<T> {
+  return prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`SET TRANSACTION READ ONLY`;
+    return work(tx);
+  }, {
+    maxWait: 15_000,
+    timeout: 30_000,
+    isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+  });
+}
+
 /**
  * Serialize ledger mutations across processes using a PostgreSQL transaction
  * advisory lock. This single-user ledger deliberately trades writer throughput

@@ -23,6 +23,21 @@ describe("domain money and budget rules", () => {
     expect(moneyToCents("20000000")).toBe(2_000_000_000);
   });
 
+  it.each(["0x10", "1,2,3", "1e3", "1E3", "+1", "12,34.56", "1,000,00", "1 000", ".50", "1."])("rejects ambiguous amount notation %j", (amount) => {
+    expect(() => moneyToCents(amount)).toThrow("金额必须是非负数字");
+  });
+
+  it("rounds using decimal digits even at the ceiling and below a cent", () => {
+    expect(moneyToCents("19,999,999.995")).toBe(2_000_000_000);
+    expect(moneyToCents("20000000.004999999999999999")).toBe(2_000_000_000);
+    expect(() => moneyToCents("20000000.005")).toThrow("金额超出可记录范围");
+    expect(() => moneyToCents("99999999999999999999999999999")).toThrow("金额超出可记录范围");
+    expect(moneyToCents("0.004999999999999999")).toBe(0);
+    expect(moneyToCents("0.005000000000000001")).toBe(1);
+    expect(moneyToCents(1e-7)).toBe(0);
+    expect(moneyToCents(1000)).toBe(100_000);
+  });
+
   it("rejects malformed dates and months instead of normalizing them", () => {
     expect(() => parseDateOnly("2025-02-29")).toThrow("日期无效");
     expect(() => parseMonth("2025-13")).toThrow("月份格式应为 YYYY-MM");
@@ -43,7 +58,9 @@ describe("month boundaries", () => {
   });
 
   it("keeps empty budgets meaningful and clamps subscription billing dates", () => {
-    expect(calculateUsage(0, 100)).toBeNull();
+    expect(calculateUsage(null, 100)).toBeNull();
+    expect(calculateUsage(0, 0)).toBe(0);
+    expect(calculateUsage(0, 100)).toBe(100);
     expect(billingDate("2025-02", 31).toISOString().slice(0, 10)).toBe("2025-02-28");
   });
 

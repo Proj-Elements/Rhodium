@@ -14,6 +14,7 @@ import { apiFetch, errorMessage } from "@/lib/api-client";
 import { isCurrentMonthReady, runClientLoad } from "@/lib/client-load";
 import { formatMoney, monthStart, todayInShanghai } from "@/lib/domain";
 import { useToday } from "@/lib/use-today";
+import { useLedgerRevision } from "@/lib/ledger-events";
 
 type Summary = {
   month: string;
@@ -25,6 +26,7 @@ type Summary = {
   incomeCents: number;
   remainingCents: number | null;
   dailyAverageCents: number;
+  grossDailyAverageCents: number;
   dailyBreakdown: { date: string; expenseCents: number; incomeCents: number; transactionCount: number }[];
   topCategory: { name: string; amountCents: number } | null;
   topDate: { date: string; amountCents: number } | null;
@@ -107,6 +109,7 @@ export default function SettlementsPage() {
   const deepLinkHandled = useRef(false);
   const { message, flash } = useFlash();
   const today = useToday();
+  const ledgerRevision = useLedgerRevision();
   const status = today && month ? getStatus(month, today) : null;
 
   const reload = () => setReloadToken((token) => token + 1);
@@ -123,6 +126,7 @@ export default function SettlementsPage() {
     setLoading(true);
     setError("");
     setSummary(null);
+    setTrend([]);
     setConfirmSettle(null);
     void runClientLoad({
       signal: controller.signal,
@@ -140,7 +144,7 @@ export default function SettlementsPage() {
       fallback: "暂时无法读取月度回顾",
     });
     return () => controller.abort();
-  }, [month, reloadToken]);
+  }, [month, today, reloadToken, ledgerRevision]);
 
   useEffect(() => {
     if (!month) return;
@@ -220,14 +224,14 @@ export default function SettlementsPage() {
             <div className="flex flex-wrap items-center justify-between gap-3 text-xs"><div className="flex flex-wrap items-center gap-3"><span className="font-medium tabular-nums">{monthLabel(month)} · 月度账本</span><Chip size="sm" variant="soft" color={settled ? "success" : "default"}><Chip.Label>{statusText}</Chip.Label></Chip><span className="text-[11px] text-muted">{settled && settledAt ? `快照保存于 ${settledAt}` : status === "future" ? "月份尚未开始，暂不可结算" : "确认结算后，将保存收支快照并锁定账目"}</span></div><Link href={`/transactions?month=${month}`} className="text-link">查看当月账目<Icon name="arrow" size={13} /></Link></div>
             <section className="grid grid-cols-2 gap-4 lg:grid-cols-4 reveal" aria-label="月度汇总">
               <MetricCard label="月度预算" value={summary.budgetCents === null ? "未设置" : formatMoney(summary.budgetCents)} detail="为生活设定的舒适范围" icon="target" />
-              <MetricCard label="当月支出" value={formatMoney(summary.expenseCents)} detail={`${summary.expenseTransactionCount} 笔支出 · 日均 ${formatMoney(summary.dailyAverageCents)}`} icon="expense" />
+              <MetricCard label="当月账面支出" value={formatMoney(summary.expenseCents)} detail={`${summary.expenseTransactionCount} 笔 · 账面日均 ${formatMoney(summary.grossDailyAverageCents)}`} icon="expense" />
               <MetricCard label="预算余量" value={summary.remainingCents === null ? "—" : formatMoney(summary.remainingCents)} detail="月度预算减去自付支出" icon="wallet" tone={summary.remainingCents !== null && summary.remainingCents < 0 ? "danger" : undefined} />
               <MetricCard label="当月净收支" value={`${netCents >= 0 ? "+" : "−"}${formatMoney(Math.abs(netCents))}`} detail={`总收入 ${formatMoney(summary.incomeCents)}`} icon="trend" tone={netCents > 0 ? "income" : undefined} />
             </section>
 
             {summary.reimbursedCount > 0 && <p className="flex flex-wrap gap-x-4 gap-y-2 px-1 text-xs text-muted"><span>已报销 <strong className="font-medium tabular-nums text-success">{formatMoney(summary.reimbursedCents)} · {summary.reimbursedCount} 笔</strong></span><span>自付 <strong className="font-medium tabular-nums text-foreground">{formatMoney(summary.outOfPocketCents)}</strong></span><span>报销不计为收入，预算与收支差额按自付计算。</span></p>}
             <div className="grid items-start gap-5 lg:grid-cols-12 reveal reveal-delay-1">
-              <Card className="panel lg:col-span-8"><div className="section-heading"><div><h2 className="section-title">生活的收支日历</h2><p className="section-description">颜色越深，代表当天的支出越多。</p></div><span className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted"><i className="size-1.5 rounded-full bg-success" />有收入</span></div><DailyCalendar key={month} month={month} days={summary.dailyBreakdown} /></Card>
+              <Card className="panel lg:col-span-8"><div className="section-heading"><div><h2 className="section-title">生活的收支日历</h2><p className="section-description">颜色表示账面支出，包含已报销记录。</p></div><span className="flex shrink-0 items-center gap-1.5 text-[10px] text-muted"><i className="size-1.5 rounded-full bg-success" />有收入</span></div><DailyCalendar key={month} month={month} days={summary.dailyBreakdown} /></Card>
               <div className="flex flex-col gap-5 lg:col-span-4">
                 <Card className="panel"><div className="section-heading"><div><h2 className="section-title">这个月的几个瞬间</h2><p className="section-description">从数字里，看见日常的侧面。</p></div></div><dl className="flex flex-col gap-7"><div><dt className="mb-2 flex items-center gap-2 text-[11px] text-muted"><Icon name="tag" size={14} />支出最多的分类</dt><dd className="flex flex-wrap items-center justify-between gap-2 text-sm font-medium"><span>{summary.topCategory?.name || "暂无记录"}</span><span className="text-xs tabular-nums">{summary.topCategory ? formatMoney(summary.topCategory.amountCents) : "—"}</span></dd></div><div><dt className="mb-2 flex items-center gap-2 text-[11px] text-muted"><Icon name="calendar" size={14} />支出最多的一天</dt><dd className="flex flex-wrap items-center justify-between gap-2 text-sm font-medium"><span className="tabular-nums">{summary.topDate?.date.slice(5).replace("-", " / ") || "暂无记录"}</span><span className="text-xs tabular-nums">{summary.topDate ? formatMoney(summary.topDate.amountCents) : "—"}</span></dd></div><div><dt className="mb-2 flex items-center gap-2 text-[11px] text-muted"><Icon name="repeat" size={14} />自动记录的固定支出</dt><dd className="text-lg font-medium tabular-nums">{formatMoney(summary.subscriptionExpenseCents)}</dd></div></dl></Card>
                 <div className="px-2 py-1"><span className="mb-3 inline-flex text-accent"><Icon name="leaf" size={20} /></span><p className="text-[13px] font-medium leading-7">{settled ? "记下的每一笔，都是生活的底气。" : "不必追求完美的数字，只要比上个月更了解自己。"}</p><p className="mt-2 text-[11px] text-muted">Rhodium，陪你慢慢找到自己的节奏。</p></div>

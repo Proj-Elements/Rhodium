@@ -15,6 +15,8 @@ vi.mock("@/lib/prisma", () => ({
     budgetPreset: { findUnique: vi.fn() },
     transaction: { findMany: vi.fn() },
     monthlySettlement: { findUnique: vi.fn() },
+    $transaction: vi.fn(),
+    $executeRaw: vi.fn(),
   },
 }));
 
@@ -28,6 +30,7 @@ const monthlyBudget = prisma.monthlyBudget.findUnique as unknown as Mock;
 const budgetPreset = prisma.budgetPreset.findUnique as unknown as Mock;
 const findTransactions = prisma.transaction.findMany as unknown as Mock;
 const findSettlement = prisma.monthlySettlement.findUnique as unknown as Mock;
+const readTransaction = prisma.$transaction as unknown as Mock;
 
 // A closed month keeps `dailyAverageCents` independent of the current date.
 const MONTH = "2024-01";
@@ -61,6 +64,8 @@ beforeEach(() => {
   budgetPreset.mockResolvedValue(null);
   findTransactions.mockResolvedValue([]);
   findSettlement.mockResolvedValue(null);
+  readTransaction.mockImplementation(async (work) => work(prisma));
+  vi.mocked(prisma.$executeRaw).mockResolvedValue(0);
 });
 
 describe("resolveBudget", () => {
@@ -82,6 +87,21 @@ describe("resolveBudget", () => {
   it("treats a zero preset as a real budget rather than as missing", async () => {
     budgetPreset.mockResolvedValue({ id: 1, amountCents: 0 });
     await expect(resolveBudget(MONTH)).resolves.toEqual({ amountCents: 0, source: "preset" });
+  });
+
+  it("uses the captured budget once a month is settled", async () => {
+    monthlyBudget.mockResolvedValue({ amountCents: 300_000 });
+    budgetPreset.mockResolvedValue({ amountCents: 400_000 });
+    findSettlement.mockResolvedValue({ reopenedAt: null, remainingAmountCents: 120_000, budgetAmountCents: 200_000 });
+
+    await expect(resolveBudget(MONTH)).resolves.toEqual({ amountCents: 200_000, source: "settlement" });
+  });
+
+  it("preserves an unset budget captured by settlement", async () => {
+    budgetPreset.mockResolvedValue({ amountCents: 400_000 });
+    findSettlement.mockResolvedValue({ reopenedAt: null, remainingAmountCents: null, budgetAmountCents: 0 });
+
+    await expect(resolveBudget(MONTH)).resolves.toEqual({ amountCents: null, source: "settlement" });
   });
 });
 
@@ -125,6 +145,7 @@ describe("getMonthSummary", () => {
 
     expect(summary).toMatchObject({
       budgetCents: 200_000,
+      budgetSource: "settlement",
       expenseCents: 50_000,
       incomeCents: 5_000,
       remainingCents: 150_000,
@@ -149,6 +170,26 @@ describe("getMonthSummary", () => {
     const summary = await getMonthSummary(MONTH);
 
     expect(summary).toMatchObject({ budgetCents: 300_000, expenseCents: 70_000, remainingCents: 230_000 });
+  });
+
+  it("keeps the captured category names and amounts after a category is renamed", async () => {
+    findTransactions.mockResolvedValue([row({ amountCents: 5000, category: { name: "改名后的分类" } })]);
+    findSettlement.mockResolvedValue({
+      id: "settlement-1",
+      month: new Date("2024-01-01T00:00:00.000Z"),
+      budgetAmountCents: 20_000,
+      expenseAmountCents: 5000,
+      incomeAmountCents: 0,
+      remainingAmountCents: 15_000,
+      settledAt: new Date("2024-02-01T00:00:00.000Z"),
+      reopenedAt: null,
+      categorySnapshot: [{ categoryId: "cat_food", categoryName: "原始分类", expenseCents: 5000, outOfPocketCents: 5000, incomeCents: 0 }],
+    });
+
+    const summary = await getMonthSummary(MONTH);
+
+    expect(summary.topCategory).toEqual({ name: "原始分类", amountCents: 5000 });
+    expect(summary.categoryBreakdown).toEqual([{ categoryId: "cat_food", categoryName: "原始分类", amountCents: 5000 }]);
   });
 
   it("queries the month as a half-open range", async () => {
@@ -222,6 +263,14 @@ describe("getMonthSummary", () => {
     expect(summary.remainingCents).toBe(5_000);
     // 一月有 31 天：15000 / 31 ≈ 484。
     expect(summary.dailyAverageCents).toBe(484);
+    expect(summary.grossDailyAverageCents).toBe(871);
+  });
+
+  it("reads all summary components in one repeatable-read transaction", async () => {
+    await getMonthSummary(MONTH);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), expect.objectContaining({ isolationLevel: "RepeatableRead" }));
   });
 
   it("reports zeros without any reimbursement", async () => {

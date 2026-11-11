@@ -2,10 +2,10 @@ import { NextResponse } from "next/server";
 import { TransactionType } from "@prisma/client";
 import { calculateRemaining, calculateUsage, dateOnlyKey, daysInMonth, parseMonth, todayInShanghai } from "@/lib/domain";
 import { handleApiError, monthRange } from "@/lib/api";
-import { prisma } from "@/lib/prisma";
+import { withLedgerRead } from "@/lib/ledger-write";
 import { serializeTransaction, transactionInclude } from "@/lib/serializers";
-import { syncSubscriptions } from "@/lib/subscriptions";
 import { resolveBudget } from "@/lib/budget";
+import { settlementCategorySnapshot } from "@/lib/summary";
 
 export const dynamic = "force-dynamic";
 
@@ -14,11 +14,6 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const month = url.searchParams.get("month") || todayInShanghai().slice(0, 7);
     parseMonth(month);
-    // Subscription charges belong to this month's totals, so they must exist
-    // before we aggregate. The call is cooldown-cached, so a warm process does
-    // no write here.
-    await syncSubscriptions();
-
     const { start, end, nextStart } = monthRange(month);
     const today = todayInShanghai();
     const currentMonth = today.slice(0, 7);
@@ -33,28 +28,28 @@ export async function GET(request: Request) {
     const monthTxWhere = { deletedAt: null as null, occurredOn: { gte: start, lt: nextStart } };
     // 报销的支出不占预算：支出合计排除它们，报销额与笔数单独聚合。
     const monthExpenseWhere = { ...monthTxWhere, type: TransactionType.EXPENSE };
-    const [budget, expense, reimbursed, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups, categories, settlement] = await Promise.all([
-      resolveBudget(month),
-      prisma.transaction.aggregate({
+    const [budget, expense, reimbursed, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups, categories, settlement] = await withLedgerRead((tx) => Promise.all([
+      resolveBudget(month, tx),
+      tx.transaction.aggregate({
         where: { ...monthExpenseWhere, reimbursedAt: null },
         _sum: { amountCents: true },
       }),
-      prisma.transaction.aggregate({
+      tx.transaction.aggregate({
         where: { ...monthExpenseWhere, reimbursedAt: { not: null } },
         _sum: { amountCents: true },
         _count: { _all: true },
       }),
-      prisma.transaction.aggregate({
+      tx.transaction.aggregate({
         where: { ...monthTxWhere, type: TransactionType.INCOME },
         _sum: { amountCents: true },
       }),
       // One grouped query for focus-date expense+income (was two aggregates).
-      prisma.transaction.groupBy({
+      tx.transaction.groupBy({
         by: ["occurredOn", "type"],
-        where: { deletedAt: null, occurredOn: { equals: focusDate } },
+        where: { deletedAt: null, occurredOn: { equals: focusDate }, OR: [{ type: TransactionType.INCOME }, { reimbursedAt: null }] },
         _sum: { amountCents: true },
       }),
-      prisma.transaction.findMany({
+      tx.transaction.findMany({
         where: monthTxWhere,
         include: transactionInclude,
         orderBy: [{ occurredOn: "desc" }, { createdAt: "desc" }],
@@ -63,29 +58,29 @@ export async function GET(request: Request) {
       // Grouping by category through the relation avoids the follow-up
       // category.findMany that used to run after this batch.
       // 分类排行只统计未报销的支出：报销的那笔钱已经回来了。
-      prisma.transaction.groupBy({
+      tx.transaction.groupBy({
         by: ["categoryId"],
         where: { ...monthExpenseWhere, reimbursedAt: null },
         _sum: { amountCents: true },
         orderBy: { _sum: { amountCents: "desc" } },
       }),
-      prisma.transaction.count({ where: monthTxWhere }),
-      prisma.transaction.count({ where: { ...monthTxWhere, type: TransactionType.EXPENSE } }),
-      prisma.transaction.groupBy({
+      tx.transaction.count({ where: monthTxWhere }),
+      tx.transaction.count({ where: { ...monthTxWhere, type: TransactionType.EXPENSE } }),
+      tx.transaction.groupBy({
         by: ["occurredOn"],
         where: { type: TransactionType.EXPENSE, deletedAt: null, reimbursedAt: null, occurredOn: { gte: chartStart, lte: focusDate } },
         _sum: { amountCents: true },
       }),
-      prisma.transaction.groupBy({
+      tx.transaction.groupBy({
         by: ["occurredOn"],
         where: { type: TransactionType.INCOME, deletedAt: null, occurredOn: { gte: chartStart, lte: focusDate } },
         _sum: { amountCents: true },
       }),
       // Categories are a tiny table; loading them here avoids a second
       // sequential round trip once the expense grouping is known.
-      prisma.category.findMany({ select: { id: true, name: true } }),
-      prisma.monthlySettlement.findUnique({ where: { month: start } }),
-    ]);
+      tx.category.findMany({ select: { id: true, name: true } }),
+      tx.monthlySettlement.findUnique({ where: { month: start } }),
+    ]));
 
     const categoryMap = new Map(categories.map((category) => [category.id, category.name]));
 
@@ -115,12 +110,26 @@ export async function GET(request: Request) {
       : expense._sum.amountCents ?? 0;
     const incomeCents = settled ? settlement.incomeAmountCents : income._sum.amountCents ?? 0;
     const remainingCents = settled ? settlement.remainingAmountCents : calculateRemaining(budgetCents, expenseCents);
+    const capturedCategories = settled ? settlementCategorySnapshot(settlement.categorySnapshot) : null;
+    const categoryBreakdown = capturedCategories
+      ? capturedCategories.filter((item) => item.outOfPocketCents > 0).map((item) => ({
+        categoryId: item.categoryId,
+        categoryName: item.categoryName,
+        amountCents: item.outOfPocketCents,
+      })).sort((first, second) => second.amountCents - first.amountCents)
+      : grouped.map((item) => ({
+        categoryId: item.categoryId,
+        categoryName: categoryMap.get(item.categoryId) || "其他",
+        amountCents: item._sum.amountCents ?? 0,
+      }));
     return NextResponse.json({
       month,
       today,
       focusDate: dateOnlyKey(focusDate),
       budget: budgetCents === null ? null : { amountCents: budgetCents },
-      budgetSource: budget.source,
+      budgetSource: settled ? "settlement" : budget.source,
+      locked: settled,
+      readOnly: settled,
       expenseCents,
       outOfPocketCents: expenseCents,
       reimbursedCents,
@@ -135,11 +144,7 @@ export async function GET(request: Request) {
       monthStatus,
       daysElapsed: monthStatus === "current" ? Number(today.slice(8, 10)) : monthStatus === "past" ? daysInMonth(month) : 0,
       daysInMonth: daysInMonth(month),
-      categoryBreakdown: grouped.map((item) => ({
-        categoryId: item.categoryId,
-        categoryName: categoryMap.get(item.categoryId) || "其他",
-        amountCents: item._sum.amountCents ?? 0,
-      })),
+      categoryBreakdown,
       recentExpenses,
       recentTransactions: transactions.map(serializeTransaction),
     });

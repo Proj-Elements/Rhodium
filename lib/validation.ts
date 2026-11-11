@@ -33,7 +33,11 @@ export const transactionSchema = z.object({
   occurredOn: dateValue,
   categoryId: z.string().min(1),
   note: z.string().max(200).optional().nullable(),
-});
+}).strict();
+
+export const transactionEditSchema = transactionSchema.extend({
+  expectedVersion: z.number().int().positive(),
+}).strict();
 
 export const budgetSchema = z.object({
   amount: amountValue,
@@ -62,22 +66,22 @@ export const subscriptionToggleSchema = z
 
 /** Restore-only PATCH body for a soft-deleted transaction ({ restore: true }). */
 export const transactionRestoreSchema = z
-  .object({ restore: z.literal(true) })
+  .object({ restore: z.literal(true), expectedVersion: z.number().int().positive() })
   .strict();
 
 /**
  * Reimburse-only PATCH body ({ reimburse: true }). Strict like the restore
  * body so extra fields cannot ride along. Undoing a reimbursement has its own
  * strict body too ({ unreimburse: true }) so it cannot be confused with an
- * edit; a full edit still clears the stamp as before.
+ * edit. Ordinary edits preserve the stamp.
  */
 export const transactionReimburseSchema = z
-  .object({ reimburse: z.literal(true) })
+  .object({ reimburse: z.literal(true), expectedVersion: z.number().int().positive() })
   .strict();
 
 /** Un-reimburse-only PATCH body ({ unreimburse: true }). */
 export const transactionUnreimburseSchema = z
-  .object({ unreimburse: z.literal(true) })
+  .object({ unreimburse: z.literal(true), expectedVersion: z.number().int().positive() })
   .strict();
 
 export const categorySchema = z.object({
@@ -95,102 +99,4 @@ export const categoryPatchSchema = z
   .strict()
   .refine((body) => Object.keys(body).length > 0, "没有需要更新的字段");
 
-const backupIdValue = z.string().trim().min(1).max(60);
-
-/** Bound work before per-element parsing, not only after array validation. */
-function boundedArray<T extends z.ZodType>(element: T, maximum: number) {
-  return z.preprocess((value, context) => {
-    if (Array.isArray(value) && value.length > maximum) {
-      context.addIssue({ code: "too_big", origin: "array", maximum, inclusive: true });
-      return z.NEVER;
-    }
-    return value;
-  }, z.array(element).max(maximum));
-}
-
-/**
- * Backup payloads used to be `z.record(z.unknown())`, which let a caller push
- * arbitrary shapes — including primary keys — straight into `upsert`. The rows
- * are now described explicitly and unknown keys are stripped.
- *
- * Category ids are correlation keys. Full backups retain subscription identities
- * (names are not unique) just as transaction rows retain theirs; only the
- * explicitly validated mutable columns below may be restored.
- */
-const backupCategorySchema = z.object({
-  id: backupIdValue,
-  name: z.string().trim().min(1).max(30),
-  type: z.string().optional().nullable(),
-  isSystem: z.union([z.boolean(), z.string()]).optional(),
-  sortOrder: z.coerce.number().int().min(-2_147_483_648).max(2_147_483_647).optional(),
-  archivedAt: z.string().optional().nullable(),
-  icon: categoryIconValue,
-});
-
-const backupSubscriptionSchema = z.object({
-  id: backupIdValue,
-  name: z.string().trim().min(1).max(80),
-  amountCents: z.union([z.number(), z.string()]),
-  billingDay: z.union([z.number(), z.string()]),
-  categoryId: backupIdValue,
-  startMonth: z.string(),
-  endMonth: z.string().optional().nullable(),
-  active: z.union([z.boolean(), z.string()]).optional(),
-  note: z.string().max(200).optional().nullable(),
-});
-
-const backupBudgetSchema = z.object({
-  month: dateValue,
-  amountCents: z.union([z.number(), z.string()]),
-});
-
-const backupSettlementSchema = z.object({
-  month: dateValue,
-  budgetAmountCents: z.union([z.number(), z.string()]),
-  expenseAmountCents: z.union([z.number(), z.string()]),
-  incomeAmountCents: z.union([z.number(), z.string()]),
-  remainingAmountCents: z.union([z.number(), z.string()]).optional().nullable(),
-  settledAt: z.string().optional().nullable(),
-  reopenedAt: z.string().optional().nullable(),
-});
-
-const backupTransactionSchema = z.object({
-  id: backupIdValue,
-  type: z.string().optional(),
-  amountCents: z.union([z.number(), z.string()]),
-  occurredOn: z.string(),
-  categoryId: backupIdValue,
-  note: z.string().max(200).optional().nullable(),
-  source: z.string().optional(),
-  subscriptionId: backupIdValue.optional().nullable(),
-  subscriptionMonth: z.string().optional().nullable(),
-  subscriptionOccurrenceKey: z.string().optional().nullable(),
-  deletedAt: z.string().optional().nullable(),
-  reimbursedAt: z.string().optional().nullable(),
-});
-
-export const backupSchema = z.object({
-  version: z.union([z.number(), z.string()]).optional(),
-  exportedAt: z.string().optional(),
-  categories: boundedArray(backupCategorySchema, 500).optional(),
-  subscriptions: boundedArray(backupSubscriptionSchema, 500)
-    .refine((rows) => new Set(rows.map((row) => row.id)).size === rows.length, "备份包含重复订阅 ID")
-    .optional(),
-  // Missing in legacy backups means preserve; explicit null restores no preset.
-  budgetPreset: z.object({ amountCents: z.number().int().min(0).max(2_000_000_000) }).nullable().optional(),
-  budgets: boundedArray(backupBudgetSchema, 1200).optional(),
-  settlements: boundedArray(backupSettlementSchema, 1200).optional(),
-  // Only the row batch is executed; the archive remains bounded by the 8 MB body limit.
-  transactions: z.array(backupTransactionSchema).optional(),
-});
-
-export type BackupPayload = z.infer<typeof backupSchema>;
-
-export const importSchema = z.object({
-  format: z.enum(["json", "csv"]),
-  // Empty row lists are legal: a full backup may only carry categories,
-  // subscriptions, budgets or settlements. The real ceiling on a payload is
-  // the 8 MB body limit; this cap just bounds the row-loop work inside.
-  rows: boundedArray(z.record(z.string(), z.unknown()), 20_000),
-  backup: backupSchema.optional(),
-});
+export { backupSchema, importSchema, type BackupPayload } from "@/lib/backup-validation";

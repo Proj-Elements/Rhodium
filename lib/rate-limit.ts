@@ -23,20 +23,33 @@ type Window = { count: number; resetAt: number };
 const windows = new Map<string, Window>();
 
 /** Keeps the map from growing without bound if keys are unique per request. */
-const MAX_TRACKED_KEYS = 5_000;
+export const MAX_TRACKED_KEYS = 5_000;
 
-function prune(now: number): void {
+function prune(now: number): number {
+  let nextReset = Infinity;
   for (const [key, window] of windows) {
     if (window.resetAt <= now) windows.delete(key);
+    else nextReset = Math.min(nextReset, window.resetAt);
   }
+  return nextReset;
 }
 
 export function checkRateLimit(key: string, rule: RateLimitRule, now = Date.now()): RateLimitResult {
-  if (windows.size > MAX_TRACKED_KEYS) prune(now);
+  if (windows.size >= MAX_TRACKED_KEYS && !windows.has(key)) {
+    const nextReset = prune(now);
+    if (windows.size >= MAX_TRACKED_KEYS) {
+      return {
+        allowed: false,
+        limit: rule.limit,
+        remaining: 0,
+        retryAfterSeconds: Math.max(1, Math.ceil((nextReset - now) / 1000)),
+      };
+    }
+  }
 
   const existing = windows.get(key);
   const window = existing && existing.resetAt > now ? existing : { count: 0, resetAt: now + rule.windowMs };
-  window.count += 1;
+  window.count = Math.min(window.count + 1, rule.limit + 1);
   windows.set(key, window);
 
   const allowed = window.count <= rule.limit;

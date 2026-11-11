@@ -2,11 +2,10 @@ import { NextResponse } from "next/server";
 import { handleApiError, parseJsonBody, monthRange } from "@/lib/api";
 import { addMonths, moneyToCents, monthKey, monthStart, parseMonth } from "@/lib/domain";
 import { conflict } from "@/lib/errors";
-import { prisma } from "@/lib/prisma";
-import { withLedgerWrite } from "@/lib/ledger-write";
+import { withLedgerRead, withLedgerWrite } from "@/lib/ledger-write";
 import { budgetSchema } from "@/lib/validation";
 import { isMonthLocked } from "@/lib/summary";
-import { getBudgetPreset } from "@/lib/budget";
+import { getBudgetPreset, resolveBudget } from "@/lib/budget";
 import { z } from "zod";
 
 export const dynamic = "force-dynamic";
@@ -32,14 +31,22 @@ export async function GET(_request: Request, { params }: Context) {
   try {
     const { month } = await params;
     parseMonth(month);
-    const [budget, preset] = await Promise.all([
-      prisma.monthlyBudget.findUnique({ where: { month: monthRange(month).start } }),
-      getBudgetPreset(),
-    ]);
-    return NextResponse.json({
-      budget: budget ? { amountCents: budget.amountCents } : null,
-      preset: preset === null ? null : { amountCents: preset },
-      effectiveBudgetCents: budget?.amountCents ?? preset,
+    return await withLedgerRead(async (tx) => {
+      const [budget, preset, resolved] = await Promise.all([
+        tx.monthlyBudget.findUnique({ where: { month: monthRange(month).start } }),
+        getBudgetPreset(tx),
+        resolveBudget(month, tx),
+      ]);
+      const locked = resolved.source === "settlement";
+      return NextResponse.json({
+        budget: locked
+          ? resolved.amountCents === null ? null : { amountCents: resolved.amountCents }
+          : budget ? { amountCents: budget.amountCents } : null,
+        preset: preset === null ? null : { amountCents: preset },
+        effectiveBudgetCents: resolved.amountCents,
+        source: resolved.source,
+        locked,
+      });
     });
   } catch (error) {
     return handleApiError(error);

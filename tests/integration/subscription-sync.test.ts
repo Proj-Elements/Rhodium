@@ -3,13 +3,17 @@ import { POST as createSubscription } from "@/app/api/subscriptions/route";
 import { POST as reopenMonth } from "@/app/api/settlements/[month]/reopen/route";
 import { monthStart, parseDateOnly, todayInShanghai } from "@/lib/domain";
 import { resetSubscriptionSyncCache, syncSubscriptions } from "@/lib/subscriptions";
+import { initialBillingHistory } from "@/lib/billing-history";
 import { createCategory, prisma, resetDatabase, routeContext } from "./helpers";
 
 const REFERENCE = "2024-03-10";
 
 async function addSubscription(name: string, categoryId: string, amountCents = 1_000) {
   return prisma.subscription.create({
-    data: { name, categoryId, amountCents, billingDay: 5, startMonth: parseDateOnly("2024-01-01") },
+    data: {
+      name, categoryId, amountCents, billingDay: 5, startMonth: parseDateOnly("2024-01-01"),
+      billingHistory: initialBillingHistory({ name, categoryId, amountCents, billingDay: 5, startMonth: "2024-01", endMonth: null, note: null }),
+    },
   });
 }
 
@@ -24,7 +28,7 @@ describe("syncSubscriptions", () => {
     await addSubscription("网盘", category.id);
 
     const first = await syncSubscriptions(REFERENCE);
-    expect(first).toEqual({ created: 3, syncedThrough: REFERENCE });
+    expect(first).toEqual({ created: 3, syncedThrough: REFERENCE, skippedUnknownHistory: 0, historyWarnings: [] });
 
     resetSubscriptionSyncCache();
     const second = await syncSubscriptions(REFERENCE);
@@ -117,7 +121,10 @@ describe("route writes invalidate the sync cache", () => {
     const category = await createCategory();
     const month = todayInShanghai().slice(0, 7);
     await prisma.subscription.create({
-      data: { name: "云盘", categoryId: category.id, amountCents: 1_000, billingDay: 1, startMonth: monthStart(month) },
+      data: {
+        name: "云盘", categoryId: category.id, amountCents: 1_000, billingDay: 1, startMonth: monthStart(month),
+        billingHistory: initialBillingHistory({ name: "云盘", categoryId: category.id, amountCents: 1_000, billingDay: 1, startMonth: month, endMonth: null, note: null }),
+      },
     });
     await prisma.monthlySettlement.create({
       data: { month: monthStart(month), budgetAmountCents: 0, expenseAmountCents: 0, incomeAmountCents: 0, remainingAmountCents: null },

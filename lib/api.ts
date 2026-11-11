@@ -32,13 +32,15 @@ export function handleApiError(error: unknown) {
  * legitimately carry thousands of rows, so they get a larger ceiling.
  */
 export const MAX_BODY_BYTES = 256 * 1024;
-export const MAX_IMPORT_BODY_BYTES = 8 * 1024 * 1024;
+export const MAX_IMPORT_BODY_BYTES = 64 * 1024 * 1024;
 
 function tooLargeMessage(maxBytes: number): string {
   return `请求体过大，最多 ${Math.round(maxBytes / 1024)} KB`;
 }
 
 export async function parseJsonBody(request: Request, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
+  const mediaType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+  if (mediaType !== "application/json") throw new AppError("请求体必须使用 application/json", 415);
   const declared = Number(request.headers.get("content-length"));
   if (Number.isFinite(declared) && declared > maxBytes) throw new AppError(tooLargeMessage(maxBytes), 413);
   // Content-Length may be missing or false. Stop at the byte boundary instead

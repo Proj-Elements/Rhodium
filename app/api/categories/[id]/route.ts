@@ -5,6 +5,8 @@ import { withLedgerWrite } from "@/lib/ledger-write";
 import { invalidateSubscriptionSyncCache } from "@/lib/subscriptions";
 import { serializeCategory } from "@/lib/serializers";
 import { categoryPatchSchema } from "@/lib/validation";
+import { todayInShanghai } from "@/lib/domain";
+import { changeBillingPause } from "@/lib/billing-pauses";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +25,10 @@ export async function PATCH(request: Request, { params }: Context) {
         data: {
           ...(typeof body.name === "string" ? { name: body.name } : {}),
           ...(body.icon !== undefined ? { icon: body.icon } : {}),
-          ...(typeof body.archived === "boolean" ? { archivedAt: body.archived ? new Date() : null } : {}),
+          ...(typeof body.archived === "boolean" ? {
+            archivedAt: body.archived ? category.archivedAt ?? new Date() : null,
+            billingPauses: changeBillingPause(category.billingPauses, body.archived, todayInShanghai()),
+          } : {}),
         },
       });
       return NextResponse.json({ category: serializeCategory(updated) });

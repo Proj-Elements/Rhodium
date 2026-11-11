@@ -94,6 +94,8 @@ describe("pre-TRUNCATE guard", () => {
     expect(mocks.query).toHaveBeenCalledOnce();
     expect(mocks.truncate).toHaveBeenCalledOnce();
     expect(mocks.query.mock.invocationCallOrder[0]).toBeLessThan(mocks.truncate.mock.invocationCallOrder[0]);
-    expect(mocks.truncate.mock.calls[0][0]).toContain('TRUNCATE TABLE "public"."Transaction"');
+    const query = mocks.truncate.mock.calls[0][0];
+    expect(query).toMatch(/^TRUNCATE TABLE /);
+    for (const table of ["Transaction", "TransactionHistory", "SettlementHistory", "CreationRequest"]) expect(query).toContain(`"public"."${table}"`);
   });
 });

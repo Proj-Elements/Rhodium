@@ -13,8 +13,12 @@ import { Toast, useFlash } from "@/components/toast";
 import { apiFetch, errorMessage } from "@/lib/api-client";
 import { isClientDataReady, runClientLoad } from "@/lib/client-load";
 import { getCategoryColor, getCategoryColors } from "@/lib/category-colors";
-import { formatMoney, todayInShanghai } from "@/lib/domain";
+import { billingDate, dateOnlyKey, formatMoney, todayInShanghai } from "@/lib/domain";
+import { effectiveBillingPlan } from "@/lib/billing-history";
+import { isBillingPaused } from "@/lib/billing-pauses";
 import { CategoryDTO, SubscriptionDTO } from "@/lib/types";
+import { useToday } from "@/lib/use-today";
+import { useLedgerRevision } from "@/lib/ledger-events";
 
 type SubscriptionFilter = "all" | "active" | "paused";
 
@@ -35,12 +39,14 @@ export default function SubscriptionsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const { message, flash } = useFlash();
-  const today = todayInShanghai();
-  const ready = isClientDataReady(loading, error);
+  const today = useToday();
+  const ledgerRevision = useLedgerRevision();
+  const ready = Boolean(today) && isClientDataReady(loading, error);
 
   const reload = () => setReloadToken((token) => token + 1);
 
   useEffect(() => {
+    if (!today) return;
     const controller = new AbortController();
     setLoading(true);
     setError("");
@@ -59,20 +65,21 @@ export default function SubscriptionsPage() {
       fallback: "暂时无法读取固定支出",
     });
     return () => controller.abort();
-  }, [reloadToken]);
+  }, [reloadToken, today, ledgerRevision]);
 
   async function toggle(subscription: SubscriptionDTO) {
     if (!ready || busyId) return;
     setBusyId(subscription.id);
     try {
-      await apiFetch(`/api/subscriptions/${subscription.id}`, {
+      const result = await apiFetch<{ subscription: SubscriptionDTO }>(`/api/subscriptions/${subscription.id}`, {
         method: "PATCH",
         json: { active: !subscription.active },
       });
       setSubscriptions((items) =>
-        items.map((item) => (item.id === subscription.id ? { ...item, active: !item.active } : item)),
+        items.map((item) => (item.id === subscription.id ? result.subscription : item)),
       );
       flash(subscription.active ? "订阅已暂停" : "订阅已启用");
+      reload();
     } catch (toggleError) {
       flash(errorMessage(toggleError, "状态更新失败"));
     } finally {
@@ -96,9 +103,17 @@ export default function SubscriptionsPage() {
   }
 
   const activeCount = subscriptions.filter((item) => item.active).length;
-  const currentSubscriptions = subscriptions.filter((item) => subscriptionState(item, today) === "current");
-  const activeTotal = currentSubscriptions.reduce((sum, item) => sum + item.amountCents, 0);
-  const nextDue = subscriptions.map((item) => nextSubscriptionDate(item, today)).filter((date): date is string => Boolean(date)).sort()[0];
+  const currentSubscriptions = today ? subscriptions.filter((item) => {
+    if (subscriptionState(item, today) !== "current") return false;
+    const plan = effectiveBillingPlan(item.billingHistory, today.slice(0, 7));
+    if (!plan) return true;
+    const dueDate = dateOnlyKey(billingDate(today.slice(0, 7), plan.billingDay));
+    const category = item.currentCategory ?? item.category;
+    return !isBillingPaused([...item.billingPauses, ...(category.billingPauses ?? [])], dueDate);
+  }) : [];
+  const unknownCurrentPlans = currentSubscriptions.filter((item) => item.currentAmountCents === null).length;
+  const activeTotal = currentSubscriptions.reduce((sum, item) => sum + (item.currentAmountCents ?? 0), 0);
+  const nextDue = today ? subscriptions.map((item) => nextSubscriptionDate(item, today)).filter((date): date is string => Boolean(date)).sort()[0] : null;
   const visibleSubscriptions = useMemo(
     () =>
       subscriptions.filter(
@@ -106,7 +121,7 @@ export default function SubscriptionsPage() {
       ),
     [subscriptions, filter],
   );
-  const currentMonth = today.slice(0, 7);
+  const currentMonth = today?.slice(0, 7) ?? "";
   const categoryColors = useMemo(() => getCategoryColors([
     ...categories.map((category) => category.id),
     ...subscriptions.map((subscription) => subscription.category.id),
@@ -116,9 +131,9 @@ export default function SubscriptionsPage() {
     <AppShell actions={<Button onPress={() => setShowForm(true)} isDisabled={!ready}><Icon name="plus" size={16} />添加固定支出</Button>}>
       <div className="page-stack">
         <section className="grid gap-4 sm:grid-cols-3 reveal" aria-label="固定支出概况">
-          <MetricCard label="本月固定支出" value={loading ? "—" : formatMoney(activeTotal)} detail="仅计入本月生效且分类可用的项目" icon="wallet" />
-          <MetricCard label="本月生效项目" value={<>{loading ? "—" : currentSubscriptions.length}<span className="ml-1.5 text-xs font-normal tracking-normal text-muted">项</span></>} detail={`共 ${subscriptions.length} 项记录 · ${activeCount} 项已启用`} icon="repeat" />
-          <MetricCard label="下次自动记录" value={loading ? "—" : nextDue ? `${Number(nextDue.slice(5, 7))} 月 ${Number(nextDue.slice(8))} 日` : "暂无安排"} detail="到达记录日后，打开账本即会同步" icon="calendar" />
+          <MetricCard label="本月计划固定支出" value={!ready ? "—" : unknownCurrentPlans ? "待核对" : formatMoney(activeTotal)} detail={unknownCurrentPlans ? `${unknownCurrentPlans} 项缺少本月可确认的历史计划，请核对后手动记账` : "按本月有效计划计入，暂停期间的记录日除外"} icon="wallet" />
+          <MetricCard label="本月生效项目" value={<>{!ready ? "—" : currentSubscriptions.length}<span className="ml-1.5 text-xs font-normal tracking-normal text-muted">项</span></>} detail={ready ? `共 ${subscriptions.length} 项记录 · ${activeCount} 项已启用` : "等待账本读取完成"} icon="repeat" />
+          <MetricCard label="下次自动记录" value={!ready ? "—" : nextDue ? `${Number(nextDue.slice(5, 7))} 月 ${Number(nextDue.slice(8))} 日` : "暂无安排"} detail="到达记录日后，打开账本即会同步" icon="calendar" />
         </section>
 
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -134,8 +149,9 @@ export default function SubscriptionsPage() {
           <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3 reveal reveal-delay-1">
             {visibleSubscriptions.map((subscription) => {
               const palette = categoryColors.get(subscription.category.id) ?? getCategoryColor(subscription.category.id);
-              const state = subscriptionState(subscription, today);
-              const due = nextSubscriptionDate(subscription, today);
+              const referenceDate = today ?? todayInShanghai();
+              const state = subscriptionState(subscription, referenceDate);
+              const due = nextSubscriptionDate(subscription, referenceDate);
               const stateLabel = { current: "自动记账中", upcoming: "尚未开始", ended: "已结束", paused: "已暂停", archived: "分类已停用" }[state];
               return <Card key={subscription.id} className="panel flex flex-col justify-between gap-6">
                 <div>
@@ -143,6 +159,7 @@ export default function SubscriptionsPage() {
                     <Switch size="sm" isSelected={subscription.active} isDisabled={Boolean(busyId)} aria-label={`${subscription.active ? "暂停" : "启用"}${subscription.name}`} onChange={() => void toggle(subscription)}><Switch.Content><Switch.Control><Switch.Thumb /></Switch.Control></Switch.Content></Switch>
                   </div>
                   <div className="mb-6 mt-7 flex items-center gap-2"><strong className="text-[30px] font-medium leading-none tracking-tight tabular-nums">{formatMoney(subscription.amountCents)}</strong><span className="self-end text-[11px] text-muted">/ 月</span></div>
+                  {subscription.billingEffectiveMonth && <p className="-mt-4 mb-5 text-[11px] leading-6 text-muted">当前计划从 {subscription.billingEffectiveMonth} 生效{subscription.currentAmountCents !== null && subscription.billingEffectiveMonth > currentMonth ? `；本月 ${formatMoney(subscription.currentAmountCents)}` : ""}</p>}
                   <dl className="flex flex-col gap-3.5 text-xs"><div className="flex items-center justify-between gap-2"><dt className="text-muted">记录日</dt><dd className="tabular-nums">每月 {subscription.billingDay} 日</dd></div><div className="flex items-center justify-between gap-2"><dt className="text-muted">下次记录</dt><dd className="tabular-nums">{due ? due.replaceAll("-", " / ") : "—"}</dd></div><div className="flex items-center justify-between gap-2"><dt className="text-muted">生效月份</dt><dd className="text-right text-[11px] tabular-nums">{monthLabel(subscription.startMonth.slice(0, 7))}{subscription.endMonth ? ` — ${monthLabel(subscription.endMonth.slice(0, 7))}` : " 起"}</dd></div></dl>
                   {subscription.note && <p className="mt-4 line-clamp-2 text-xs leading-6 text-muted" title={subscription.note}>{subscription.note}</p>}
                 </div>
@@ -152,7 +169,7 @@ export default function SubscriptionsPage() {
           </div>
         )}
       </div>
-      {(showForm || editing) && ready && <SubscriptionForm categories={categories} subscription={editing} defaultMonth={currentMonth} onClose={() => { setShowForm(false); setEditing(null); }} onSaved={() => { setShowForm(false); setEditing(null); reload(); }} />}
+      {(showForm || editing) && currentMonth && <SubscriptionForm categories={categories} subscription={editing} defaultMonth={currentMonth} onClose={() => { setShowForm(false); setEditing(null); reload(); }} onSaved={() => { setShowForm(false); setEditing(null); reload(); }} />}
       {pendingDelete && ready && <ConfirmDialog title="移除这项固定支出？" description={`「${pendingDelete.name}」之后不再自动记账。存在历史账目的项目会保留并暂停；尚未生成账目的项目将被删除。`} confirmLabel="确认移除" danger busy={Boolean(busyId)} onConfirm={() => void remove(pendingDelete)} onClose={() => setPendingDelete(null)} />}
       {message && <Toast message={message} />}
     </AppShell>

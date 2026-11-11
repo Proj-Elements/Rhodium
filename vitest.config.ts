@@ -13,7 +13,7 @@ export default defineConfig({
     // The integration suite needs a real database; it runs via `npm run test:db`.
     // Agent tooling checks out scratch worktrees inside the repo directory
     // (.claude/.freebuff/.copilot); their suites are not part of this project.
-    exclude: [...defaultExclude, "tests/integration/**", ".claude/**", ".freebuff/**", ".copilot/**"],
+    exclude: [...defaultExclude, "tests/integration/**", "scripts/**/*.test.mjs", ".claude/**", ".freebuff/**", ".copilot/**", ".delta/**", ".entire/**", ".thinkrail/**", ".codex/**"],
     // Sequential execution in one worker: the suite is small and tests share
     // a module registry, so worker-parallelism overhead is not worth it.
     pool: "forks",

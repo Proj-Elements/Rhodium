@@ -1,31 +1,55 @@
 import { addMonths, billingDate, dateOnlyKey } from "@/lib/domain";
 import type { SubscriptionDTO } from "@/lib/types";
+import { effectiveBillingPlan } from "@/lib/billing-history";
+import { isBillingPaused } from "@/lib/billing-pauses";
 
 export type SubscriptionState = "current" | "upcoming" | "ended" | "paused" | "archived";
 
 /** Classify display state without treating future, expired or archived items as current spending. */
 export function subscriptionState(subscription: SubscriptionDTO, today: string): SubscriptionState {
   if (!subscription.active) return "paused";
-  if (subscription.category.archivedAt) return "archived";
   const month = today.slice(0, 7);
-  if (subscription.startMonth.slice(0, 7) > month) return "upcoming";
-  if (subscription.endMonth && subscription.endMonth.slice(0, 7) < month) return "ended";
+  const history = subscription.billingHistory ?? [];
+  const plan = history.length ? effectiveBillingPlan(history, month) : subscription;
+  if (!plan || plan.startMonth.slice(0, 7) > month) return "upcoming";
+  const category = subscription.currentCategory ?? subscription.category;
+  if (category.archivedAt && plan.categoryId === category.id) return "archived";
+  if (plan.endMonth && plan.endMonth.slice(0, 7) < month) {
+    return history.some((item) => item.effectiveMonth > month && (!item.endMonth || item.endMonth >= item.effectiveMonth)) ? "upcoming" : "ended";
+  }
   return "current";
 }
 
 /** Next scheduled ledger date, clamped to month end; null for non-billing items. */
 export function nextSubscriptionDate(subscription: SubscriptionDTO, today: string): string | null {
-  const state = subscriptionState(subscription, today);
-  if (state !== "current" && state !== "upcoming") return null;
-  const startMonth = subscription.startMonth.slice(0, 7);
+  if (!subscription.active) return null;
   const currentMonth = today.slice(0, 7);
-  let month = startMonth > currentMonth ? startMonth : currentMonth;
-  let date = dateOnlyKey(billingDate(month, subscription.billingDay));
-  if (date < today) {
-    month = addMonths(month, 1);
-    date = dateOnlyKey(billingDate(month, subscription.billingDay));
+  const history = subscription.billingHistory?.length ? subscription.billingHistory : [{
+    ...subscription,
+    effectiveMonth: subscription.startMonth.slice(0, 7),
+    startMonth: subscription.startMonth.slice(0, 7),
+    endMonth: subscription.endMonth?.slice(0, 7) ?? null,
+  }];
+  for (let index = 0; index < history.length; index += 1) {
+    const plan = history[index];
+    let month = [currentMonth, plan.effectiveMonth, plan.startMonth].sort().at(-1)!;
+    const nextEffectiveMonth = history[index + 1]?.effectiveMonth;
+    while ((!plan.endMonth || month <= plan.endMonth) && (!nextEffectiveMonth || month < nextEffectiveMonth)) {
+      const category = plan.categoryId === subscription.currentCategory?.id ? subscription.currentCategory : subscription.category;
+      if (category.archivedAt && plan.categoryId === category.id) break;
+      const date = dateOnlyKey(billingDate(month, plan.billingDay));
+      if (date < today) {
+        month = addMonths(month, 1);
+        continue;
+      }
+      const pause = [...(subscription.billingPauses ?? []), ...(plan.categoryId === category.id ? category.billingPauses ?? [] : [])].find((item) => isBillingPaused([item], date));
+      if (!pause) return date;
+      if (pause.end === null) break;
+      const resumeMonth = pause.end.slice(0, 7);
+      month = resumeMonth > month ? resumeMonth : addMonths(month, 1);
+    }
   }
-  return subscription.endMonth && month > subscription.endMonth.slice(0, 7) ? null : date;
+  return null;
 }
 
 /** Reflect the server's distinct hard-delete and historical-item archive outcomes. */

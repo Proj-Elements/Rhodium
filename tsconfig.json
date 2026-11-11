@@ -38,6 +38,13 @@
     ".next-refine/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    ".claude",
+    ".freebuff",
+    ".copilot",
+    ".delta",
+    ".entire",
+    ".thinkrail",
+    ".codex"
   ]
 }

@@ -11,6 +11,8 @@ import { requestNewTransaction } from "@/lib/new-transaction-intent";
 import { nextColorMode } from "@/lib/theme";
 import { useColorMode } from "@/lib/use-color-mode";
 import { useToday } from "@/lib/use-today";
+import { apiFetch } from "@/lib/api-client";
+import { announceLedgerUpdate } from "@/lib/ledger-events";
 
 const navItems = [
   { href: "/dashboard", label: "财务总览", icon: "grid" },
@@ -35,6 +37,7 @@ export function AppShell({ children, actions }: { children: ReactNode; actions?:
   const page = pages[pathname] || pages["/dashboard"];
   const today = useToday();
   const [syncState, setSyncState] = useState<"syncing" | "ready" | "error">("syncing");
+  const [unknownHistoryCount, setUnknownHistoryCount] = useState(0);
   const { mode, setMode, hydrated, systemDark } = useColorMode();
   const nextMode = nextColorMode(mode, systemDark);
 
@@ -44,15 +47,19 @@ export function AppShell({ children, actions }: { children: ReactNode; actions?:
   }
 
   useEffect(() => {
-    let mounted = true;
-    fetch("/api/subscriptions/sync", { method: "POST" })
-      .then((response) => {
-        if (!response.ok) throw new Error("sync failed");
-        if (mounted) setSyncState("ready");
+    if (!today) return;
+    const controller = new AbortController();
+    setSyncState("syncing");
+    void apiFetch<{ skippedUnknownHistory?: number }>("/api/subscriptions/sync", { method: "POST", signal: controller.signal })
+      .then((result) => {
+        if (controller.signal.aborted) return;
+        setSyncState("ready");
+        setUnknownHistoryCount(result.skippedUnknownHistory ?? 0);
+        announceLedgerUpdate();
       })
-      .catch(() => { if (mounted) setSyncState("error"); });
-    return () => { mounted = false; };
-  }, []);
+      .catch(() => { if (!controller.signal.aborted) setSyncState("error"); });
+    return () => controller.abort();
+  }, [today]);
 
   const sidebarContent = (
     <>
@@ -119,6 +126,7 @@ export function AppShell({ children, actions }: { children: ReactNode; actions?:
           <div className="page-actions">{actions !== undefined ? actions : <Button variant="primary" onPress={openNewTransaction}><Icon name="plus" size={16} />记一笔</Button>}</div>
         </header>
         {syncState === "error" && <p role="status" className="mb-5 text-xs text-warning">固定支出同步失败，请刷新重试。</p>}
+        {syncState === "ready" && unknownHistoryCount > 0 && <p role="status" className="mb-5 text-xs leading-6 text-warning">有 {unknownHistoryCount} 项固定支出的早期价格未知，早期缺口未自动补记。请在<Link className="underline underline-offset-4" href="/subscriptions">固定支出</Link>核对，并在需要时手动记账。</p>}
         {children}
       </div>
     </AppLayout>

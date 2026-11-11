@@ -79,7 +79,7 @@ describe("import preview selection", () => {
     const { controller, state, request } = setup();
     const backup = { version: 1, transactions: [], categories: [{ id: "category", name: "分类" }] };
     await controller.select(file("backup.json", JSON.stringify(backup)));
-    expect(request).toHaveBeenCalledWith({ format: "json", rows: [], backup }, expect.any(AbortSignal));
+    expect(request).toHaveBeenCalledWith({ backup }, expect.any(AbortSignal));
     expect(state()).toMatchObject({ status: "ready", selection: { backup, rows: [] } });
   });
 
@@ -92,5 +92,15 @@ describe("import preview selection", () => {
     await controller.select(file("invalid.json", text));
     expect(state().status).toBe("error");
     expect(request).not.toHaveBeenCalled();
+  });
+
+  it("transmits a large exported transaction array exactly once", async () => {
+    const { controller, request } = setup();
+    const transactions = Array.from({ length: 7000 }, (_, id) => ({ id: String(id), occurredOn: "2024-05-01", amountCents: 1, note: "测".repeat(200) }));
+    await controller.select(file("backup.json", JSON.stringify({ version: 1, transactions })));
+    const sent = (request.mock.calls as unknown as [{ rows?: unknown[]; backup: Record<string, unknown> }][]) [0][0];
+    expect(sent.rows).toBeUndefined();
+    expect(sent.backup.transactions).toEqual(transactions);
+    expect(Buffer.byteLength(JSON.stringify(sent))).toBeLessThan(8 * 1024 * 1024);
   });
 });

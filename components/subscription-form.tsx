@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Input, Label, ListBox, Select, TextArea } from "@heroui/react";
 import { apiFetch, errorMessage } from "@/lib/api-client";
+import { addMonths, todayInShanghai } from "@/lib/domain";
 import { CategoryDTO, SubscriptionDTO } from "@/lib/types";
 import { IconButton } from "@/components/icon-button";
 import { ModalDialog } from "@/components/modal-dialog";
@@ -36,6 +37,18 @@ export function SubscriptionForm({
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
+  const requestRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+  const futurePlan = Boolean(subscription && subscription.startMonth.slice(0, 7) > todayInShanghai().slice(0, 7));
+  const editEffectiveMonth = addMonths(todayInShanghai().slice(0, 7), 1);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      requestRef.current?.abort();
+    };
+  }, []);
 
   useEffect(() => {
     if (error) errorRef.current?.scrollIntoView({ block: "nearest" });
@@ -59,9 +72,12 @@ export function SubscriptionForm({
       return;
     }
     setSaving(true);
+    const controller = new AbortController();
+    requestRef.current = controller;
     try {
       await apiFetch(subscription ? `/api/subscriptions/${subscription.id}` : "/api/subscriptions", {
         method: subscription ? "PATCH" : "POST",
+        signal: controller.signal,
         json: {
           name,
           amount,
@@ -73,16 +89,23 @@ export function SubscriptionForm({
           note,
         },
       });
-      onSaved();
+      if (mountedRef.current) onSaved();
     } catch (saveError) {
-      setError(errorMessage(saveError, "保存失败，请稍后再试"));
+      if (mountedRef.current) setError(errorMessage(saveError, "保存失败，请稍后再试"));
     } finally {
-      setSaving(false);
+      if (mountedRef.current) setSaving(false);
+      if (requestRef.current === controller) requestRef.current = null;
     }
   }
 
+  function close() {
+    mountedRef.current = false;
+    requestRef.current?.abort();
+    onClose();
+  }
+
   return (
-    <ModalDialog labelledBy="subscription-form-title" dismissable={!saving} onClose={onClose} onSubmit={submit} header={
+    <ModalDialog labelledBy="subscription-form-title" busy={saving} onClose={close} onSubmit={submit} header={
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <p className="text-[11px] text-muted">把重复的事情，交给 Rhodium</p>
@@ -91,12 +114,14 @@ export function SubscriptionForm({
           </h2>
           <p className="text-xs leading-6 text-muted">到达记录日后自动记账，不会发起真实扣款。</p>
         </div>
-        <IconButton icon="close" label="关闭固定支出表单" size="sm" onPress={onClose} isDisabled={saving} />
+        <IconButton icon="close" label="关闭固定支出表单" size="sm" onPress={close} />
       </div>
     } footer={<>
-      <Button type="button" variant="ghost" onPress={onClose} isDisabled={saving}>取消</Button>
+      <Button type="button" variant="ghost" onPress={close}>{saving ? "停止等待并关闭" : "取消"}</Button>
       <Button type="submit" variant="primary" isPending={saving} isDisabled={available.length === 0}>{subscription ? "保存修改" : "保存固定支出"}</Button>
     </>}>
+
+      {subscription && <Alert status="default"><Alert.Indicator /><Alert.Content><Alert.Title>{futurePlan ? "尚未开始的计划按新的起始月份执行" : `本次计划修改从 ${editEffectiveMonth} 生效`}</Alert.Title><Alert.Description>金额、记录日、分类和备注变更不改写已发生的月份；暂停或恢复按操作当天生效。</Alert.Description></Alert.Content></Alert>}
 
       <div className="flex flex-col gap-1.5">
         <label className="text-sm font-medium text-foreground" htmlFor="sub-name">
@@ -241,6 +266,7 @@ export function SubscriptionForm({
           </Alert.Content>
         </Alert>
       )}
+      {saving && <p className="text-xs leading-6 text-muted">关闭只会停止等待，服务端可能已保存。再次操作前请核对固定支出列表。</p>}
 
     </ModalDialog>
   );

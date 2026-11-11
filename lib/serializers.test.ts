@@ -11,12 +11,14 @@ const category: Category = {
   isSystem: false,
   sortOrder: 3,
   archivedAt: null,
+  billingPauses: [],
   createdAt: new Date("2024-01-01T00:00:00.000Z"),
   updatedAt: new Date("2024-01-02T00:00:00.000Z"),
 };
 
 const transaction: Transaction & { category: Category; subscription: { name: string } | null } = {
   id: "txn_1",
+  version: 1,
   type: "EXPENSE",
   amountCents: 1234,
   occurredOn: new Date("2024-03-10T00:00:00.000Z"),
@@ -38,6 +40,8 @@ describe("serializeTransaction", () => {
   it("maps a manual transaction onto the DTO", () => {
     expect(serializeTransaction(transaction)).toEqual({
       id: "txn_1",
+      version: 1,
+      deletedAt: "2024-03-11T00:00:00.000Z",
       type: "EXPENSE",
       amountCents: 1234,
       occurredOn: "2024-03-10",
@@ -59,9 +63,14 @@ describe("serializeTransaction", () => {
 
   it("never leaks internal columns to the client", () => {
     const dto = serializeTransaction(transaction) as Record<string, unknown>;
-    for (const field of ["deletedAt", "createdAt", "updatedAt", "subscriptionOccurrenceKey", "categoryId"]) {
+    for (const field of ["createdAt", "updatedAt", "subscriptionOccurrenceKey", "categoryId"]) {
       expect(dto).not.toHaveProperty(field);
     }
+  });
+
+  it("exposes the observed version and deletion state for safe edits and recovery", () => {
+    expect(serializeTransaction(transaction)).toMatchObject({ version: 1, deletedAt: "2024-03-11T00:00:00.000Z" });
+    expect(serializeTransaction({ ...transaction, version: 3, deletedAt: null })).toMatchObject({ version: 3, deletedAt: null });
   });
 
   it("keeps the subscription name and month for generated rows", () => {
@@ -126,6 +135,8 @@ describe("serializeSettlement", () => {
       remainingAmountCents: 180_000,
       settledAt: "2024-04-01T10:00:00.000Z",
       reopenedAt: null,
+      revision: 1,
+      categorySnapshot: null,
     });
   });
 
@@ -143,6 +154,16 @@ describe("serializeSettlement", () => {
     expect(dto.reopenedAt).toBe("2024-04-02T10:00:00.000Z");
     expect(dto.remainingAmountCents).toBeNull();
   });
+
+  it("preserves the settlement revision and category snapshot", () => {
+    const categorySnapshot = [{ categoryId: "cat_1", categoryName: "餐饮", expenseCents: 1200, outOfPocketCents: 1000, incomeCents: 0 }];
+    const dto = serializeSettlement({
+      id: "set_1", month: new Date("2024-03-01T00:00:00.000Z"), budgetAmountCents: 3000, expenseAmountCents: 1200,
+      incomeAmountCents: 0, remainingAmountCents: 2000, settledAt: new Date("2024-04-01T00:00:00.000Z"), reopenedAt: null,
+      revision: 3, categorySnapshot,
+    });
+    expect(dto).toMatchObject({ revision: 3, categorySnapshot });
+  });
 });
 
 describe("serializeSubscription", () => {
@@ -156,6 +177,8 @@ describe("serializeSubscription", () => {
     endMonth: null as Date | null,
     active: true,
     note: null as string | null,
+    billingPauses: [],
+    billingHistory: [],
     category,
   };
 
@@ -181,11 +204,16 @@ describe("serializeSubscription", () => {
       amountCents: 2500,
       billingDay: 8,
       categoryId: "cat_1",
-      category: serializeCategory(category),
+      category: { ...serializeCategory(category), billingPauses: [] },
       startMonth: "2024-03",
       endMonth: null,
       active: true,
       note: null,
+      billingPauses: [],
+      billingHistory: [],
+      billingEffectiveMonth: null,
+      currentAmountCents: null,
+      currentCategory: null,
     });
   });
 });

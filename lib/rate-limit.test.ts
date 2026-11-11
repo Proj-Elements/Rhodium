@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { checkRateLimit, resetRateLimiter } from "@/lib/rate-limit";
+import { checkRateLimit, MAX_TRACKED_KEYS, resetRateLimiter } from "@/lib/rate-limit";
 
 const RULE = { limit: 3, windowMs: 60_000 };
 
@@ -35,5 +35,16 @@ describe("checkRateLimit", () => {
     const afterWindow = checkRateLimit("read:a", RULE, 1_000 + RULE.windowMs + 1);
     expect(afterWindow.allowed).toBe(true);
     expect(afterWindow.remaining).toBe(RULE.limit - 1);
+  });
+
+  it("rejects new keys at the hard capacity while retaining existing budgets", () => {
+    for (let index = 0; index < MAX_TRACKED_KEYS; index += 1) {
+      expect(checkRateLimit(`read:${index}`, RULE, 1_000).allowed).toBe(true);
+    }
+    for (let index = 0; index < 2; index += 1) {
+      expect(checkRateLimit(`new:${index}`, RULE, 1_000)).toMatchObject({ allowed: false, retryAfterSeconds: 60 });
+    }
+    expect(checkRateLimit("read:0", RULE, 1_000)).toMatchObject({ allowed: true, remaining: 1 });
+    expect(checkRateLimit("after-expiry", RULE, 61_000)).toMatchObject({ allowed: true, remaining: 2 });
   });
 });

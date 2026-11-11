@@ -122,7 +122,7 @@ describe("POST /api/import", () => {
     return new Request("http://localhost/api/import", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ format: "json", rows, ...(backup ? { backup } : {}) }),
+      body: JSON.stringify(backup ? { backup: { ...backup, transactions: rows.length ? rows : backup.transactions ?? [] } } : { format: "json", rows }),
     });
   }
 
@@ -137,7 +137,7 @@ describe("POST /api/import", () => {
     }));
     const response = await importRows(importRequest(rows));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ imported: 1_500 });
+    expect(await response.json()).toMatchObject({ imported: 1_500, summary: { transactions: { create: 1_500, update: 0, unchanged: 0 }, conflicts: [], lockedMonths: [] } });
     expect(await prisma.transaction.count()).toBe(1_500);
   });
 
@@ -156,13 +156,13 @@ describe("POST /api/import", () => {
   });
 
   it("upserts rows by id only inside a backup envelope and keeps createdAt", async () => {
-    await createCategory("餐饮");
+    const category = await createCategory("餐饮");
     const envelope = { version: 1, exportedAt: "2024-06-01T00:00:00.000Z" };
-    const row = { id: "fixed-id-0001", 日期: "2024-05-09", 类型: "支出", 金额: "10.00", 分类: "餐饮", 备注: "首次" };
+    const row = { id: "fixed-id-0001", occurredOn: "2024-05-09", type: "EXPENSE", amountCents: 1_000, categoryId: category.id, note: "首次" };
     expect((await importRows(importRequest([row], envelope))).status).toBe(200);
     const first = await prisma.transaction.findUniqueOrThrow({ where: { id: "fixed-id-0001" } });
 
-    expect((await importRows(importRequest([{ ...row, 金额: "20.00", 备注: "改后" }], envelope))).status).toBe(200);
+    expect((await importRows(importRequest([{ ...row, amountCents: 2_000, note: "改后" }], envelope))).status).toBe(200);
     const second = await prisma.transaction.findUniqueOrThrow({ where: { id: "fixed-id-0001" } });
     expect(await prisma.transaction.count()).toBe(1);
     expect(second.amountCents).toBe(2_000);

@@ -15,11 +15,12 @@ vi.mock("@/lib/prisma", () => ({
     budgetPreset: { findUnique: vi.fn() },
     $transaction: vi.fn(),
     $queryRaw: vi.fn(),
+    $executeRaw: vi.fn(),
   },
 }));
 
 const { prisma } = await import("@/lib/prisma");
-const { PUT } = await import("@/app/api/budgets/[month]/route");
+const { GET, PUT } = await import("@/app/api/budgets/[month]/route");
 
 const createMany = prisma.monthlyBudget.createMany as unknown as Mock;
 const updateMany = prisma.monthlyBudget.updateMany as unknown as Mock;
@@ -47,8 +48,32 @@ beforeEach(() => {
   createMany.mockReturnValue({ count: 0 });
   updateMany.mockReturnValue({ count: 0 });
   upsert.mockResolvedValue({ amountCents: 150_000 });
+  vi.mocked(prisma.monthlyBudget.findUnique).mockResolvedValue(null);
+  vi.mocked(prisma.budgetPreset.findUnique).mockResolvedValue(null);
   transaction.mockImplementation(async (work) => work(prisma));
   vi.mocked(prisma.$queryRaw).mockResolvedValue([{ locked: 1 }]);
+  vi.mocked(prisma.$executeRaw).mockResolvedValue(0);
+});
+
+describe("GET /api/budgets/[month]", () => {
+  it("returns the captured budget for a settled month even after the preset changes", async () => {
+    vi.mocked(prisma.budgetPreset.findUnique).mockResolvedValue({ id: 1, amountCents: 300_000 } as never);
+    findSettlement.mockResolvedValue({ reopenedAt: null, remainingAmountCents: 150_000, budgetAmountCents: 200_000 });
+
+    const response = await GET(new Request("http://localhost/api/budgets/2026-03"), { params: Promise.resolve({ month: "2026-03" }) });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      budget: { amountCents: 200_000 },
+      preset: { amountCents: 300_000 },
+      effectiveBudgetCents: 200_000,
+      source: "settlement",
+      locked: true,
+    });
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(transaction).toHaveBeenCalledWith(expect.any(Function), expect.objectContaining({ isolationLevel: "RepeatableRead" }));
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
 });
 
 describe("PUT /api/budgets/[month]", () => {

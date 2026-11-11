@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { csvEscape, parseCsv, toCsv } from "@/lib/csv";
+import { CSV_ENCODING_HEADER, csvEscape, parseCsv, toCsv } from "@/lib/csv";
 
 describe("csv round-trip", () => {
   it("round-trips notes with commas, quotes, and newlines", () => {
@@ -24,6 +24,28 @@ describe("csv round-trip", () => {
   it("returns empty for header-only or empty files", () => {
     expect(parseCsv("a,b\r\n")).toEqual([]);
     expect(parseCsv("")).toEqual([]);
+  });
+
+  it.each([
+    ['a,b\n"unclosed,2', "未闭合"],
+    ['a,b\n1,an"invalid"quote', "字段开头"],
+    ['a,b\n"closed"suffix,2', "闭合引号"],
+    ['a,a\n1,2', "重复表头"],
+    ['a, a \n1,2', "重复表头"],
+    ['a,\n1,2', "表头不能为空"],
+    ['a,b\n1', "列数"],
+    ['a,b\n1,2,3', "列数"],
+  ])("rejects malformed CSV without silently dropping fields: %s", (input, message) => {
+    expect(() => parseCsv(input)).toThrow(message);
+  });
+
+  it("preserves explicitly quoted empty rows", () => {
+    expect(parseCsv('备注\n""\n\n"value"')).toEqual([{ 备注: "" }, { 备注: "value" }]);
+  });
+
+  it("rejects malformed encoding metadata", () => {
+    expect(() => parseCsv(`备注,${CSV_ENCODING_HEADER}\ntext,unknown`)).toThrow("编码标记无效");
+    expect(() => parseCsv(`${CSV_ENCODING_HEADER},备注\napostrophe-v1,text`)).toThrow("最后一列");
   });
 });
 
@@ -54,6 +76,18 @@ describe("formula injection guard", () => {
 
   it("round-trips a formula-looking note as inert text", () => {
     const parsed = parseCsv(toCsv(["备注"], [["=SUM(A1)"]]));
-    expect(parsed[0]["备注"]).toBe("'=SUM(A1)");
+    expect(parsed[0]["备注"]).toBe("=SUM(A1)");
+  });
+
+  it("round-trips formula escapes and genuine apostrophes without guessing", () => {
+    const notes = ["=SUM(A1)", "'=SUM(A1)", "'plain", "''double", "+1+1", "@cmd", "-1-1", "-5.20", "\t=1", "  =1"];
+    const exported = toCsv(["备注"], notes.map((note) => [note]));
+    expect(exported).toContain(CSV_ENCODING_HEADER);
+    expect(exported).toContain('"\'\'=SUM(A1)"');
+    expect(parseCsv(exported).map((row) => row["备注"])).toEqual(notes);
+  });
+
+  it("does not decode apostrophes in ordinary third-party CSV", () => {
+    expect(parseCsv('备注\n"\'=SUM(A1)"\n"\'plain"')).toEqual([{ 备注: "'=SUM(A1)" }, { 备注: "'plain" }]);
   });
 });

@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { handleApiError, parseJsonBody } from "@/lib/api";
 import { monthKey } from "@/lib/domain";
-import { conflict, notFound } from "@/lib/errors";
+import { badRequest, conflict, notFound } from "@/lib/errors";
 import { withLedgerWrite } from "@/lib/ledger-write";
-import { transactionReimburseSchema, transactionRestoreSchema, transactionSchema, transactionUnreimburseSchema } from "@/lib/validation";
+import { transactionEditSchema, transactionReimburseSchema, transactionRestoreSchema, transactionUnreimburseSchema } from "@/lib/validation";
 import { serializeTransaction, transactionInclude } from "@/lib/serializers";
 import { assertTransactionCategory, transactionData } from "@/lib/transactions";
 import { isMonthLocked } from "@/lib/summary";
+import { recordTransactionHistory } from "@/lib/transaction-history";
 
 export const dynamic = "force-dynamic";
 
@@ -17,56 +18,45 @@ export async function PATCH(request: Request, { params }: Context) {
     const { id } = await params;
     const body = await parseJsonBody(request);
     return await withLedgerWrite(async (tx) => {
-      const existing = await tx.transaction.findUnique({ where: { id }, select: { occurredOn: true, deletedAt: true, type: true, categoryId: true, reimbursedAt: true } });
+      const existing = await tx.transaction.findUnique({ where: { id }, include: transactionInclude });
       if (!existing) throw notFound("账目不存在");
       if (await isMonthLocked(monthKey(existing.occurredOn), tx)) throw conflict("本月已经结算，请先重新打开本月");
-
-      // Action keys must never fall through to a full edit: transactionSchema
-      // strips unknown keys, which would otherwise let a mixed body edit money.
-      if (body !== null && typeof body === "object" && ("reimburse" in body || "unreimburse" in body)) {
-        const undo = "unreimburse" in body;
-        (undo ? transactionUnreimburseSchema : transactionReimburseSchema).parse(body);
-        if (existing.type !== "EXPENSE") throw conflict(undo ? "只有支出才能撤销报销" : "只有支出才能标记报销");
-        if (existing.deletedAt) throw conflict(undo ? "这条账目已被删除，无法撤销报销" : "这条账目已被删除，无法报销");
-        const alreadyApplied = undo ? existing.reimbursedAt === null : existing.reimbursedAt !== null;
-        if (alreadyApplied) return NextResponse.json({ transaction: serializeTransaction(await tx.transaction.findUniqueOrThrow({ where: { id }, include: transactionInclude })) });
-        const reimbursed = await tx.transaction.update({
+      if (body !== null && typeof body === "object" && ("restore" in body || "reimburse" in body || "unreimburse" in body)) {
+        const action = "restore" in body ? "restore" : "unreimburse" in body ? "unreimburse" : "reimburse";
+        const schema = action === "restore" ? transactionRestoreSchema : action === "unreimburse" ? transactionUnreimburseSchema : transactionReimburseSchema;
+        const parsed = schema.parse(body);
+        if (parsed.expectedVersion !== existing.version) throw conflict("账目已被其他操作修改，请刷新后重试");
+        if (action === "restore") {
+          if (!existing.deletedAt) throw conflict("这条账目没有被删除，无需恢复");
+          await assertTransactionCategory(existing.categoryId, existing.type === "EXPENSE" ? "expense" : "income", tx);
+        } else {
+          const undo = action === "unreimburse";
+          if (existing.type !== "EXPENSE") throw conflict(undo ? "只有支出才能撤销报销" : "只有支出才能标记报销");
+          if (existing.deletedAt) throw conflict(undo ? "这条账目已被删除，无法撤销报销" : "这条账目已被删除，无法报销");
+          if (undo ? existing.reimbursedAt === null : existing.reimbursedAt !== null) return NextResponse.json({ transaction: serializeTransaction(existing) });
+        }
+        const transaction = await tx.transaction.update({
           where: { id },
-          data: { reimbursedAt: undo ? null : new Date() },
+          data: {
+            ...(action === "restore" ? { deletedAt: null } : { reimbursedAt: action === "unreimburse" ? null : new Date() }),
+            version: { increment: 1 },
+          },
           include: transactionInclude,
         });
-        return NextResponse.json({ transaction: serializeTransaction(reimbursed) });
+        await recordTransactionHistory(tx, transaction, action, existing);
+        return NextResponse.json({ transaction: serializeTransaction(transaction) });
       }
-
-      // Restore is its own strict body so it cannot smuggle other fields past
-      // transactionSchema, and it only applies to a soft-deleted row.
-      if (transactionRestoreSchema.safeParse(body).success) {
-        if (!existing.deletedAt) throw conflict("这条账目没有被删除，无需恢复");
-        // The row may have sat deleted for a while: refuse to bring it back on a
-        // category that was archived or retyped meanwhile.
-        await assertTransactionCategory(existing.categoryId, existing.type === "EXPENSE" ? "expense" : "income", tx);
-        const restored = await tx.transaction.update({
-          where: { id },
-          data: { deletedAt: null },
-          include: transactionInclude,
-        });
-        return NextResponse.json({ transaction: serializeTransaction(restored) });
-      }
-
-      // Soft-deleted rows are invisible everywhere else; editing them in place
-      // would return a DTO that hides deletedAt and pretend the row is live.
       if (existing.deletedAt) throw conflict("这条账目已被删除，请先恢复后再编辑");
-
-      const parsed = transactionSchema.parse(body);
+      const parsed = transactionEditSchema.parse(body);
+      if (parsed.expectedVersion !== existing.version) throw conflict("账目已被其他操作修改，请刷新后重试");
       if (await isMonthLocked(parsed.occurredOn.slice(0, 7), tx)) throw conflict("目标月份已经结算，请先重新打开本月");
       await assertTransactionCategory(parsed.categoryId, parsed.type, tx);
-      // 报销状态只能通过 { reimburse: true } 设置；完整编辑只能撤销报销
-      //（改金额/改日期前先取消报销，避免已报销的账目被偷偷改掉）。
-      const transaction = await tx.transaction.update({
-        where: { id },
-        data: { ...transactionData(parsed), reimbursedAt: null },
-        include: transactionInclude,
-      });
+      const data = transactionData(parsed);
+      if (existing.reimbursedAt && (data.amountCents !== existing.amountCents || data.type !== existing.type || data.occurredOn.getTime() !== existing.occurredOn.getTime())) {
+        throw conflict("这笔支出已报销，请先明确撤销报销，再修改金额、日期或收支类型");
+      }
+      const transaction = await tx.transaction.update({ where: { id }, data: { ...data, version: { increment: 1 } }, include: transactionInclude });
+      await recordTransactionHistory(tx, transaction, "edit", existing);
       return NextResponse.json({ transaction: serializeTransaction(transaction) });
     });
   } catch (error) {
@@ -74,19 +64,20 @@ export async function PATCH(request: Request, { params }: Context) {
   }
 }
 
-export async function DELETE(_request: Request, { params }: Context) {
+export async function DELETE(request: Request, { params }: Context) {
   try {
     const { id } = await params;
     return await withLedgerWrite(async (tx) => {
-      const existing = await tx.transaction.findUnique({ where: { id }, select: { occurredOn: true } });
+      const existing = await tx.transaction.findUnique({ where: { id }, include: transactionInclude });
       if (!existing) throw notFound("账目不存在");
       if (await isMonthLocked(monthKey(existing.occurredOn), tx)) throw conflict("本月已经结算，请先重新打开本月");
-      // 报销是会计事实，删除也一样：软删除保留 reimbursedAt，恢复后仍是已报销状态。
-      const transaction = await tx.transaction.update({
-        where: { id },
-        data: { deletedAt: new Date() },
-      });
-      return NextResponse.json({ id: transaction.id, deleted: true });
+      const versionValue = new URL(request.url).searchParams.get("expectedVersion") ?? "";
+      if (!/^[1-9]\d*$/.test(versionValue) || !Number.isSafeInteger(Number(versionValue))) throw badRequest("删除账目需要有效的 expectedVersion");
+      if (Number(versionValue) !== existing.version) throw conflict("账目已被其他操作修改，请刷新后重试");
+      if (existing.deletedAt) return NextResponse.json({ id, deleted: true, version: existing.version, transaction: serializeTransaction(existing) });
+      const transaction = await tx.transaction.update({ where: { id }, data: { deletedAt: new Date(), version: { increment: 1 } }, include: transactionInclude });
+      await recordTransactionHistory(tx, transaction, "delete", existing);
+      return NextResponse.json({ id, deleted: true, version: transaction.version, transaction: serializeTransaction(transaction) });
     });
   } catch (error) {
     return handleApiError(error);
