@@ -39,7 +39,7 @@ export function trustedArtifactRun(artifact, run, currentRun, policy) {
   return artifact.expired === false && artifact.workflow_run?.id === run.id && run.status === "completed" && run.conclusion === "success" && trustedArtifactSource(run, currentRun, policy);
 }
 
-function inspectPackage(root, expectedVersion) {
+export function inspectPackage(root, expectedVersion) {
   if (lstatSync(root).isSymbolicLink()) throw new Error("Licensed package root cannot be a symlink");
   const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   if (manifest.name !== packageName || manifest.version !== expectedVersion || typeof manifest.types !== "string") throw new Error("Licensed package metadata differs from the lockfile");
@@ -49,7 +49,7 @@ function inspectPackage(root, expectedVersion) {
   while (pending.length) {
     const directory = pending.pop();
     for (const entry of readdirSync(directory, { withFileTypes: true })) {
-      if (entry.isSymbolicLink() || entry.name.startsWith(".") || /^(?:node_modules)$|\.(?:pem|key)$/i.test(entry.name)) throw new Error("Licensed package contains a forbidden file");
+      if (entry.isSymbolicLink() || entry.name.startsWith(".") || /\.(?:pem|key)$/i.test(entry.name)) throw new Error("Licensed package contains a forbidden file");
       if (entry.isDirectory()) pending.push(join(directory, entry.name));
       else if (!entry.isFile()) throw new Error("Licensed package contains a non-regular file");
     }

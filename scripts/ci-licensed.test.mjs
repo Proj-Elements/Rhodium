@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
-import { artifactSourcePolicy, trustedArtifactRun, trustedArtifactSource, validateArchiveEntries, validateLicenseManifest } from "./ci-licensed.mjs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { artifactSourcePolicy, inspectPackage, trustedArtifactRun, trustedArtifactSource, validateArchiveEntries, validateLicenseManifest } from "./ci-licensed.mjs";
 
 test("licensed artifacts require the same repository, workflow and successful push", () => {
   const artifact = { expired: false, workflow_run: { id: 2 } };
@@ -57,4 +60,20 @@ test("archives cannot escape or replace package files through links", () => {
   assert.throws(() => validateArchiveEntries(["react/package.json", "react/package.json"], ["-rw-r--r--", "-rw-r--r--"]));
   assert.throws(() => validateArchiveEntries(["react/package.json"], ["lrwxrwxrwx"]));
   assert.throws(() => validateArchiveEntries(["react/package.json"], ["hrw-r--r--"]));
+});
+
+test("installed packages allow regular nested dependencies but reject sensitive entries", () => {
+  const root = mkdtempSync(join(tmpdir(), "rhodium-license-package-"));
+  try {
+    mkdirSync(join(root, "dist"));
+    mkdirSync(join(root, "node_modules", "chalk"), { recursive: true });
+    writeFileSync(join(root, "package.json"), JSON.stringify({ name: "@heroui-pro/react", version: "1.0.0-beta.11", types: "./dist/index.d.ts" }));
+    writeFileSync(join(root, "dist", "index.d.ts"), "export {};\n");
+    writeFileSync(join(root, "node_modules", "chalk", "package.json"), JSON.stringify({ name: "chalk", version: "5.6.2" }));
+    assert.doesNotThrow(() => inspectPackage(root, "1.0.0-beta.11"));
+    writeFileSync(join(root, "node_modules", "chalk", "private.pem"), "secret");
+    assert.throws(() => inspectPackage(root, "1.0.0-beta.11"), /forbidden file/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
