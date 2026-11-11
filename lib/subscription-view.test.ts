@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { applySubscriptionRemoval, nextSubscriptionDate, subscriptionState } from "./subscription-view";
 import type { SubscriptionDTO } from "./types";
+import { initialBillingHistory, scheduleBillingPlan } from "./billing-history";
 
 const item: SubscriptionDTO = {
   id: "subscription-1", name: "校园网", amountCents: 3000, billingDay: 31, categoryId: "category-1",
   category: { id: "category-1", name: "生活", type: "EXPENSE", icon: null, isSystem: true, sortOrder: 0, archivedAt: null },
   startMonth: "2026-01-01", endMonth: null, active: true, note: null,
+  billingHistory: [], billingPauses: [], billingEffectiveMonth: null, currentAmountCents: null, currentCategory: null,
 };
 
 describe("subscription display state", () => {
@@ -42,6 +44,13 @@ describe("next scheduled ledger date", () => {
     expect(nextSubscriptionDate({ ...item, active: false }, "2026-11-03")).toBeNull();
     expect(nextSubscriptionDate({ ...item, endMonth: "2026-10-01" }, "2026-11-03")).toBeNull();
     expect(nextSubscriptionDate({ ...item, category: { ...item.category, archivedAt: "2026-11-01" } }, "2026-11-03")).toBeNull();
+  });
+
+  it("shows this month's old billing day before a scheduled plan takes effect", () => {
+    const oldPlan = { name: item.name, amountCents: 3000, categoryId: item.categoryId, billingDay: 20, startMonth: "2026-01", endMonth: null, note: null };
+    const billingHistory = scheduleBillingPlan(initialBillingHistory(oldPlan), { ...oldPlan, billingDay: 5 }, "2026-11-03");
+    expect(nextSubscriptionDate({ ...item, billingDay: 5, billingHistory }, "2026-11-03")).toBe("2026-11-20");
+    expect(nextSubscriptionDate({ ...item, billingDay: 5, billingHistory }, "2026-11-21")).toBe("2026-12-05");
   });
 });
 

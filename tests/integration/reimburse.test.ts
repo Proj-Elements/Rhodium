@@ -7,7 +7,7 @@ import { GET as getSettlementSummary } from "@/app/api/settlements/[month]/route
 import { POST as settleMonth } from "@/app/api/settlements/[month]/settle/route";
 import { POST as reopenMonth } from "@/app/api/settlements/[month]/reopen/route";
 import { GET as listTransactions, POST as createTransaction } from "@/app/api/transactions/route";
-import { DELETE as deleteTransaction, PATCH as patchTransaction } from "@/app/api/transactions/[id]/route";
+import { DELETE as deleteTransactionRoute, PATCH as patchTransactionRoute } from "@/app/api/transactions/[id]/route";
 import { monthStart } from "@/lib/domain";
 import { getMonthSummary } from "@/lib/summary";
 import { createCategory, prisma, resetDatabase, routeContext } from "./helpers";
@@ -19,6 +19,21 @@ function jsonRequest(url: string, method: string, body: unknown) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+}
+
+async function patchTransaction(request: Request, context: Parameters<typeof patchTransactionRoute>[1]) {
+  const { id } = await context.params;
+  const current = await prisma.transaction.findUnique({ where: { id } });
+  const body = await request.json() as Record<string, unknown>;
+  return patchTransactionRoute(jsonRequest(request.url, "PATCH", { expectedVersion: current?.version ?? 1, ...body }), context);
+}
+
+async function deleteTransaction(request: Request, context: Parameters<typeof deleteTransactionRoute>[1]) {
+  const { id } = await context.params;
+  const current = await prisma.transaction.findUnique({ where: { id } });
+  const url = new URL(request.url);
+  url.searchParams.set("expectedVersion", String(current?.version ?? 1));
+  return deleteTransactionRoute(new Request(url, { method: "DELETE" }), context);
 }
 
 /** find-or-create：首个 API 调用会播种同名系统分类，不能重复建。 */
@@ -131,26 +146,28 @@ describe("PATCH /api/transactions/[id] { reimburse: true }", () => {
     );
     expect(extra.status).toBe(400);
 
-    const missing = await patchTransaction(
+    const missing = await patchTransactionRoute(
       jsonRequest("http://localhost/api/transactions/missing", "PATCH", { reimburse: true }),
       routeContext({ id: "missing" }),
     );
     expect(missing.status).toBe(404);
   });
 
-  it("clears the reimbursement on a full edit and preserves it across delete/restore", async () => {
+  it("requires an explicit reimbursement undo before accounting changes and preserves it across delete/restore", async () => {
     const id = await createExpense("10.00", `${MONTH}-10`);
     await reimburse(id);
 
-    // 完整编辑会撤销报销（先取消再改金额，避免已报销账目被偷偷改动）。
     const category = await findOrCreateCategory("交通", CategoryType.EXPENSE);
+    const editBody = { type: "expense", amount: "20.00", occurredOn: `${MONTH}-15`, categoryId: category.id };
+    const rejected = await patchTransaction(
+      jsonRequest(`http://localhost/api/transactions/${id}`, "PATCH", editBody),
+      routeContext({ id }),
+    );
+    expect(rejected.status).toBe(409);
+    expect((await prisma.transaction.findUniqueOrThrow({ where: { id } })).amountCents).toBe(1000);
+    expect((await unreimburse(id)).status).toBe(200);
     const edited = await patchTransaction(
-      jsonRequest(`http://localhost/api/transactions/${id}`, "PATCH", {
-        type: "expense",
-        amount: "20.00",
-        occurredOn: `${MONTH}-15`,
-        categoryId: category.id,
-      }),
+      jsonRequest(`http://localhost/api/transactions/${id}`, "PATCH", editBody),
       routeContext({ id }),
     );
     expect(edited.status).toBe(200);
@@ -242,7 +259,7 @@ describe("reimbursement flows through the aggregates", () => {
     expect(payload.summary.remainingCents).toBeNull();
   });
 
-  it("keeps reimbursed rows visible in the month list and un-reimburses on edit", async () => {
+  it("keeps reimbursed rows visible and preserves reimbursement when changing only the note and category", async () => {
     const id = await createExpense("30.00", `${MONTH}-05`);
     await reimburse(id);
 
@@ -250,20 +267,26 @@ describe("reimbursement flows through the aggregates", () => {
     expect(list.transactions).toHaveLength(1);
     expect(list.transactions[0].reimbursedAt).not.toBeNull();
 
-    const category = (await prisma.category.findFirstOrThrow({ where: { name: "餐饮" } }));
+    const stamp = (await prisma.transaction.findUniqueOrThrow({ where: { id } })).reimbursedAt;
+    const category = await findOrCreateCategory("交通", CategoryType.EXPENSE);
     const edited = await patchTransaction(
       jsonRequest(`http://localhost/api/transactions/${id}`, "PATCH", {
         type: "expense",
         amount: "30.00",
         occurredOn: `${MONTH}-05`,
         categoryId: category.id,
+        note: "保留报销凭证",
       }),
       routeContext({ id }),
     );
     expect(edited.status).toBe(200);
+    expect(await prisma.transaction.findUniqueOrThrow({ where: { id } })).toMatchObject({
+      note: "保留报销凭证", categoryId: category.id, reimbursedAt: stamp,
+    });
     const summary = await getMonthSummary(MONTH);
-    expect(summary.reimbursedCount).toBe(0);
+    expect(summary.reimbursedCount).toBe(1);
     expect(summary.expenseCents).toBe(3_000);
+    expect(summary.outOfPocketCents).toBe(0);
   });
 });
 
@@ -332,10 +355,14 @@ describe("PATCH /api/transactions/[id] { unreimburse: true }", () => {
   });
 
   it("answers 404 for a missing row", async () => {
-    expect((await unreimburse("missing")).status).toBe(404);
+    const response = await patchTransactionRoute(
+      jsonRequest("http://localhost/api/transactions/missing", "PATCH", { unreimburse: true }),
+      routeContext({ id: "missing" }),
+    );
+    expect(response.status).toBe(404);
   });
 
-  it.each(["reimburse", "unreimburse"])("rejects %s mixed with a complete edit body", async (action) => {
+  it.each(["reimburse", "unreimburse", "restore"])("rejects %s mixed with a complete edit body", async (action) => {
     const id = await createExpense("10.00", `${MONTH}-10`);
     await reimburse(id);
     const before = await prisma.transaction.findUniqueOrThrow({ where: { id } });

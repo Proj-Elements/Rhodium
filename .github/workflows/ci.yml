@@ -5,7 +5,7 @@ on:
     branches: ['**']
     tags: ['v*']
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened, edited, ready_for_review]
   merge_group:
     types: [checks_requested]
 
@@ -21,24 +21,27 @@ jobs:
     if: github.event.deleted != true && (github.ref_type != 'tag' || (github.event_name == 'push' && github.event.created == true))
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
     services:
       postgres:
         image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
         env:
-          POSTGRES_USER: yueyu
+          POSTGRES_USER: rhodium
           POSTGRES_PASSWORD: testpw
-          POSTGRES_DB: yueyu_test
+          POSTGRES_DB: rhodium_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U yueyu -d yueyu_test"
+          --health-cmd "pg_isready -U rhodium -d rhodium_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
     env:
       # Throwaway database: integration tests TRUNCATE every table.
-      DATABASE_URL: postgresql://yueyu:testpw@127.0.0.1:5432/yueyu_test?schema=public
-      TEST_DATABASE_URL: postgresql://yueyu:testpw@127.0.0.1:5432/yueyu_test?schema=public
+      DATABASE_URL: postgresql://rhodium:testpw@127.0.0.1:5432/rhodium_test?schema=public
+      TEST_DATABASE_URL: postgresql://rhodium:testpw@127.0.0.1:5432/rhodium_test?schema=public
       NEXT_TELEMETRY_DISABLED: '1'
       # Audited local main before the empty GitHub repository's first publication.
       # Existing push/PR/queue bases always take precedence over this bootstrap.
@@ -67,13 +70,11 @@ jobs:
           VERSION: ${{ github.ref_name }}
         run: node -e 'if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(process.env.VERSION)) process.exit(1)'
 
-      # PR/queue code must never receive the license key. Without a trusted
-      # artifact channel, UI verification fails explicitly rather than going green.
-      - name: Require trusted licensed build
-        if: (steps.scope.outputs.licensed == 'true' || github.ref_type == 'tag') && github.event_name != 'push'
-        run: |
-          echo '::error::Licensed type/build checks require a trusted repository push. PR/queue code receives no HEROUI_KEY; arrange a trusted artifact channel before requiring these events for UI changes.'
-          exit 1
+      - name: Restore licensed UI from a successful trusted push
+        if: steps.scope.outputs.licensed == 'true' && github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci-licensed.mjs restore
 
       - name: Initialize licensed UI
         if: (steps.scope.outputs.licensed == 'true' || github.ref_type == 'tag') && github.event_name == 'push'
@@ -85,6 +86,24 @@ jobs:
           git diff --exit-code -- package.json package-lock.json
           node -e 'const fs=require("node:fs"),path=require("node:path"); const root=path.resolve("node_modules/@heroui-pro/react"); const p=JSON.parse(fs.readFileSync(path.join(root,"package.json"),"utf8")); if(!p.types||!fs.existsSync(path.join(root,p.types))) throw new Error("Licensed HeroUI types were not installed");'
 
+      - name: Package the installed licensed UI without credentials
+        if: (steps.scope.outputs.licensed == 'true' || github.ref_type == 'tag') && github.event_name == 'push'
+        id: license_archive
+        run: node scripts/ci-licensed.mjs prepare
+
+      - name: Retain the lockfile-matched licensed package
+        if: (steps.scope.outputs.licensed == 'true' || github.ref_type == 'tag') && github.event_name == 'push'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ${{ steps.license_archive.outputs.name }}
+          path: |
+            ${{ runner.temp }}/rhodium-license/manifest.json
+            ${{ runner.temp }}/rhodium-license/heroui-react.tgz
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+          overwrite: true
+
       - name: Mark the disposable test service
         run: |
           node <<'NODE'
@@ -92,17 +111,27 @@ jobs:
           const client = new PrismaClient();
           (async () => {
             const [identity] = await client.$queryRaw`SELECT current_database() AS database, current_user AS user`;
-            if (identity.database !== 'yueyu_test' || identity.user !== 'yueyu') {
+            if (identity.database !== 'rhodium_test' || identity.user !== 'rhodium') {
               throw new Error('Refusing to mark an unexpected CI database');
             }
-            await client.$executeRawUnsafe(`COMMENT ON DATABASE "yueyu_test" IS 'rhodium:test-database'`);
+            await client.$executeRawUnsafe(`COMMENT ON DATABASE "rhodium_test" IS 'rhodium:test-database'`);
           })().catch((error) => { console.error(error.message); process.exitCode = 1; })
             .finally(() => client.$disconnect());
           NODE
 
       - name: Verify affected components
         if: github.ref_type != 'tag'
+        env:
+          CI_CONTAINER_BUILD: ${{ steps.scope.outputs.container == 'true' && github.event_name == 'push' }}
         run: node scripts/ci-checks.mjs run
+
+      - name: Validate changed Compose definitions
+        if: steps.scope.outputs.container == 'true'
+        env:
+          POSTGRES_PASSWORD: ci-configuration-check
+        run: |
+          docker compose --file docker-compose.yml config --quiet
+          docker compose --file Docker/docker-compose.yml config --quiet
 
       - name: Build and smoke-test changed container
         if: steps.scope.outputs.container == 'true' && github.event_name == 'push'
@@ -129,7 +158,7 @@ jobs:
           npx prisma migrate deploy
           npm run typecheck
           npm run lint
-          node --test scripts/ci-checks.test.mjs
+          node --test scripts/*.test.mjs
           npm test
           npm run test:db
           npm run build

@@ -10,6 +10,9 @@ vi.mock("@/lib/prisma", () => ({
     subscription: { findMany: vi.fn() },
     monthlySettlement: { findMany: vi.fn() },
     budgetPreset: { findUnique: vi.fn() },
+    transactionHistory: { findMany: vi.fn() },
+    settlementHistory: { findMany: vi.fn() },
+    creationRequest: { findMany: vi.fn() },
     $transaction: vi.fn(),
   },
 }));
@@ -22,6 +25,9 @@ beforeEach(() => {
   vi.mocked(prisma.subscription.findMany).mockResolvedValue([]);
   vi.mocked(prisma.monthlySettlement.findMany).mockResolvedValue([]);
   vi.mocked(prisma.budgetPreset.findUnique).mockResolvedValue(null);
+  vi.mocked(prisma.transactionHistory.findMany).mockResolvedValue([]);
+  vi.mocked(prisma.settlementHistory.findMany).mockResolvedValue([]);
+  vi.mocked(prisma.creationRequest.findMany).mockResolvedValue([]);
   vi.mocked(prisma.$transaction).mockImplementation(async (work) => {
     if (typeof work !== "function") throw new Error("Expected a snapshot transaction");
     return work(prisma);
@@ -34,12 +40,15 @@ describe("Rhodium export filenames", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("Content-Disposition")).toBe('attachment; filename="rhodium-backup.json"');
     expect(await response.json()).toMatchObject({
-      version: 1,
+      version: 2,
       categories: [],
       transactions: [],
       budgets: [],
       subscriptions: [],
       settlements: [],
+      transactionHistory: [],
+      settlementHistory: [],
+      creationRequests: [],
     });
   });
 
@@ -47,6 +56,6 @@ describe("Rhodium export filenames", () => {
     const response = await GET(new Request("http://localhost/api/export?format=csv"));
     expect(response.headers.get("Content-Disposition")).toBe('attachment; filename="rhodium-transactions.csv"');
     expect(response.headers.get("Content-Type")).toBe("text/csv; charset=utf-8");
-    expect(await response.text()).toBe('"日期","类型","金额","分类","备注","来源"');
+    expect(await response.text()).toBe('"日期","类型","金额","分类","备注","来源","报销时间","__rhodium_csv_encoding"');
   });
 });

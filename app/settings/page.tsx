@@ -13,7 +13,7 @@ import { Toast, useFlash } from "@/components/toast";
 import { apiFetch, errorMessage } from "@/lib/api-client";
 import { isCurrentMonthReady, runClientLoad } from "@/lib/client-load";
 import { useToday } from "@/lib/use-today";
-import { createImportPreviewController, type ImportPreviewState } from "@/lib/import-preview-controller";
+import { createImportPreviewController, type ImportPreviewState, type ImportSummary } from "@/lib/import-preview-controller";
 import { SettingsDataBoundary } from "@/components/settings-data-boundary";
 import { ImportPreviewStatus } from "@/components/import-preview-status";
 import { categoryIconLabels, categoryIconNames, isCategoryIconName, type CategoryIconName } from "@/lib/category-icons";
@@ -32,6 +32,8 @@ export default function SettingsPage() {
   const [importState, setImportState] = useState<ImportPreviewState>({ status: "idle" });
   const [importController] = useState(() => createImportPreviewController(setImportState));
   const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState("");
+  const [importResult, setImportResult] = useState<{ imported: number; summary: ImportSummary } | null>(null);
   const importingRef = useRef(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -45,7 +47,8 @@ export default function SettingsPage() {
   const [futureBudgetInput, setFutureBudgetInput] = useState("");
   const [budgetPresetCents, setBudgetPresetCents] = useState<number | null>(null);
   const [effectiveBudgetCents, setEffectiveBudgetCents] = useState<number | null>(null);
-  const [currentMonthSource, setCurrentMonthSource] = useState<"month" | "preset" | "none">("none");
+  const [currentMonthSource, setCurrentMonthSource] = useState<"month" | "preset" | "settlement" | "none">("none");
+  const [currentMonthReadOnly, setCurrentMonthReadOnly] = useState(false);
   const [budgetSaving, setBudgetSaving] = useState(false);
 
   const today = useToday();
@@ -69,13 +72,16 @@ export default function SettingsPage() {
           budget: { amountCents: number } | null;
           preset: { amountCents: number } | null;
           effectiveBudgetCents: number | null;
+          source: "month" | "preset" | "settlement" | "none";
+          locked: boolean;
         }>(`/api/budgets/${requestedMonth}`, { signal: controller.signal }),
       ]),
       success: ([categoryResult, budgetResult]) => {
         setCategories(categoryResult.categories || []);
         setBudgetPresetCents(budgetResult.preset?.amountCents ?? null);
         setEffectiveBudgetCents(budgetResult.effectiveBudgetCents ?? null);
-        setCurrentMonthSource(budgetResult.budget ? "month" : budgetResult.preset ? "preset" : "none");
+        setCurrentMonthSource(budgetResult.source);
+        setCurrentMonthReadOnly(budgetResult.locked);
         setLoadedMonth(requestedMonth);
       },
       failure: setLoadError,
@@ -150,11 +156,16 @@ export default function SettingsPage() {
 
   function processSelectedFile(file: File | Promise<File>) {
     if (!ready || importingRef.current) return;
+    setImportError("");
+    setImportResult(null);
     void importController.select(file);
   }
 
   function cancelImport() {
-    if (!importingRef.current) importController.cancel();
+    if (!importingRef.current) {
+      importController.cancel();
+      setImportError("");
+    }
   }
 
   async function savePreset() {
@@ -180,7 +191,7 @@ export default function SettingsPage() {
   }
 
   async function saveCurrentMonthBudget() {
-    if (!ready || budgetSaving) return;
+    if (!ready || budgetSaving || currentMonthReadOnly) return;
     if (!monthBudgetInput.trim()) {
       flash("先输入本月预算金额");
       return;
@@ -229,18 +240,24 @@ export default function SettingsPage() {
   async function confirmImport() {
     if (!ready || importingRef.current || importState.status !== "ready" || importState.selection.preview.errors.length) return;
     const { format, rows, backup } = importState.selection;
+    const summary = importState.selection.preview.summary;
+    if (summary && (summary.lockedMonths.length || summary.conflicts.length)) return;
     importingRef.current = true;
     setImporting(true);
+    setImportError("");
+    setImportResult(null);
     try {
-      const result = await apiFetch<{ imported: number }>("/api/import", {
+      const result = await apiFetch<{ imported: number; summary: ImportSummary }>("/api/import", {
         method: "POST",
-        json: { format, rows, backup },
+        json: backup ? { backup } : { format, rows },
+        timeoutMs: 120_000,
       });
       importController.cancel();
+      setImportResult(result);
       flash(`已导入 ${result.imported} 条记录`);
       await load();
     } catch (importError) {
-      flash(errorMessage(importError, "导入失败"));
+      setImportError(errorMessage(importError, "导入失败"));
     } finally {
       importingRef.current = false;
       setImporting(false);
@@ -250,6 +267,9 @@ export default function SettingsPage() {
   const presetDisplay = budgetPresetCents === null ? "未设置" : formatMoney(budgetPresetCents);
   const currentMonthDisplay =
     effectiveBudgetCents === null ? "未设置" : formatMoney(effectiveBudgetCents);
+  const previewSummary = importState.status === "ready" ? importState.selection.preview.summary : undefined;
+  const importBlocked = Boolean(previewSummary && (previewSummary.lockedMonths.length || previewSummary.conflicts.length));
+  const displayedImportSummary = previewSummary ?? importResult?.summary;
 
   return (
     <AppShell actions={null}>
@@ -259,7 +279,7 @@ export default function SettingsPage() {
           <Card className="panel reveal">
             <div className="section-heading"><div><h2 className="section-title">预算，给生活一点方向</h2><p className="section-description">合理的预算不是限制，而是花钱时的底气。</p></div><span className="metric-icon"><Icon name="target" size={18} /></span></div>
             <div className="settings-row"><div className="settings-copy"><h3>每月默认预算</h3><p>没有单独设定预算的月份，将自动沿用这个金额。<br />当前预设：<b className="font-medium tabular-nums text-foreground">{loading ? "读取中…" : presetDisplay}</b></p></div><form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void savePreset(); }}><Input className={`${fieldClassName} max-w-32 tabular-nums`} aria-label="每月默认预算金额" inputMode="decimal" placeholder="输入金额" value={presetInput} onChange={(event) => setPresetInput(event.target.value)} disabled={!ready || budgetSaving} required /><Button type="submit" variant="outline" isPending={budgetSaving} isDisabled={!ready}>{budgetPresetCents === null ? "设置" : "更新"}</Button></form></div>
-            <div className="settings-row"><div className="settings-copy"><h3>只调整这个月 <span className="ml-1 text-[11px] font-normal tabular-nums text-muted">{currentMonth}</span></h3><p>当前生效：<b className="font-medium tabular-nums text-foreground">{loading ? "读取中…" : currentMonthDisplay}</b>{currentMonthSource === "preset" ? "（沿用默认预算）" : currentMonthSource === "month" ? "（本月单独设置）" : ""}<br />只对本月生效，不影响其他月份。</p></div><form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void saveCurrentMonthBudget(); }}><Input className={`${fieldClassName} max-w-32 tabular-nums`} aria-label="本月预算金额" inputMode="decimal" placeholder="输入金额" value={monthBudgetInput} onChange={(event) => setMonthBudgetInput(event.target.value)} disabled={!ready || budgetSaving} required /><Button type="submit" variant="outline" isPending={budgetSaving} isDisabled={!ready}>调整</Button></form></div>
+            <div className="settings-row"><div className="settings-copy"><h3>只调整这个月 <span className="ml-1 text-[11px] font-normal tabular-nums text-muted">{currentMonth}</span></h3><p>当前生效：<b className="font-medium tabular-nums text-foreground">{loading ? "读取中…" : currentMonthDisplay}</b>{currentMonthSource === "preset" ? "（沿用默认预算）" : currentMonthSource === "month" ? "（本月单独设置）" : currentMonthSource === "settlement" ? "（结算快照）" : ""}<br />{currentMonthReadOnly ? "本月已结算，重新打开后才能调整。" : "只对本月生效，不影响其他月份。"}</p></div><form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void saveCurrentMonthBudget(); }}><Input className={`${fieldClassName} max-w-32 tabular-nums`} aria-label="本月预算金额" inputMode="decimal" placeholder="输入金额" value={monthBudgetInput} onChange={(event) => setMonthBudgetInput(event.target.value)} disabled={!ready || budgetSaving || currentMonthReadOnly} required /><Button type="submit" variant="outline" isPending={budgetSaving} isDisabled={!ready || currentMonthReadOnly}>调整</Button></form></div>
             <details className="mt-5 border-t border-separator pt-5"><summary className="flex cursor-[var(--cursor-interactive)] list-none items-center justify-between gap-3 rounded-md text-xs text-muted focus-visible:outline-2 focus-visible:outline-focus">批量调整本月及以后的预算<Icon name="chevron" size={14} /></summary><div className="mt-5"><p className="mb-4 text-xs leading-6 text-muted">从 {currentMonth} 起，一次性设置未来 20 年内的月度预算，已结算的月份不会更改。</p><form className="flex flex-wrap items-center gap-3" onSubmit={(event) => { event.preventDefault(); if (ready && !budgetSaving && futureBudgetInput.trim()) setConfirmFuture(true); }}><Input className={`${fieldClassName} max-w-44 tabular-nums`} inputMode="decimal" aria-label="以后每月预算金额" placeholder="新的每月预算" value={futureBudgetInput} onChange={(event) => setFutureBudgetInput(event.target.value)} disabled={!ready || budgetSaving} required /><Button type="submit" variant="outline" isDisabled={!ready || budgetSaving}>应用到以后</Button></form></div></details>
           </Card>
 
@@ -307,8 +327,24 @@ export default function SettingsPage() {
             <div className="section-heading"><div><h2 className="section-title">记录在这里，数据属于你</h2><p className="section-description">定期留一份备份，安心记录每一天。</p></div></div>
             <div className="flex flex-col gap-2.5"><a href="/api/export?format=json" className="flex items-center justify-between gap-3 rounded-xl bg-surface-secondary px-4 py-3.5 text-xs focus-visible:outline-2 focus-visible:outline-focus"><span><b className="font-medium">JSON 完整备份</b><small className="mt-1 block text-[10px] text-muted">预算、分类、订阅与全部账目</small></span><Icon name="download" size={16} /></a><a href="/api/export?format=csv" className="flex items-center justify-between gap-3 rounded-xl bg-surface-secondary px-4 py-3.5 text-xs focus-visible:outline-2 focus-visible:outline-focus"><span><b className="font-medium">CSV 账目导出</b><small className="mt-1 block text-[10px] text-muted">适合在表格软件中整理分析</small></span><Icon name="download" size={16} /></a></div>
             <div className="mt-6"><h3 className="mb-3 text-xs font-medium">导入已有记录</h3><DropZone className="w-full"><DropZone.Input disabled={!ready || importing} id="import-file" accept=".json,.csv,application/json,text/csv" onSelect={(files) => { if (files?.[0]) void processSelectedFile(files[0]); }} /><DropZone.Area isDisabled={!ready || importing} className="rounded-2xl p-5" onDrop={(event) => { const file = event.items.find((item) => item.kind === "file"); if (file && file.kind === "file") processSelectedFile(file.getFile()); }}><DropZone.Icon className="text-accent"><Icon name="upload" size={22} /></DropZone.Icon><DropZone.Label className="text-xs font-medium">把文件拖到这里</DropZone.Label><DropZone.Description className="text-[10px]">支持 JSON 备份或 CSV 账目</DropZone.Description><DropZone.Trigger isDisabled={!ready || importing} className="mt-3">选择文件</DropZone.Trigger></DropZone.Area></DropZone></div>
-            <ImportPreviewStatus state={importState} busy={importing} disabled={!ready} onConfirm={() => void confirmImport()} onCancel={cancelImport} />
-            <p className="mt-4 text-[10px] leading-5 text-muted">CSV 作为新账目追加；恢复完整账本请使用 JSON 备份。导入前会先检查文件。</p>
+            {displayedImportSummary && <div className="mt-4 text-xs" aria-live="polite">
+              <h3 className="font-medium">{previewSummary ? "预计变更" : `导入完成，已处理 ${importResult?.imported ?? 0} 条账目`}</h3>
+              <dl className="mt-3 space-y-2 text-[11px] tabular-nums">
+                <div className="flex justify-between gap-3"><dt className="text-muted">账目</dt><dd>新增 {displayedImportSummary.transactions.create} · 覆盖 {displayedImportSummary.transactions.update} · 不变 {displayedImportSummary.transactions.unchanged}</dd></div>
+                {([
+                  ["分类", displayedImportSummary.categories],
+                  ["订阅", displayedImportSummary.subscriptions],
+                  ["预算", displayedImportSummary.budgets],
+                  ["结算", displayedImportSummary.settlements],
+                ] as const).map(([label, counts]) => <div key={label} className="flex justify-between gap-3"><dt className="text-muted">{label}</dt><dd>新增 {counts.create} · 覆盖 {counts.update}</dd></div>)}
+              </dl>
+              {previewSummary && <p className="mt-3 text-[10px] leading-5 text-muted">这是当前账本的预估，正式导入时会重新校验。JSON 恢复按记录标识合并；覆盖会替换现有内容。</p>}
+              {displayedImportSummary.lockedMonths.length > 0 && <p className="mt-3 text-[11px] leading-5 text-danger">涉及已结算月份：{displayedImportSummary.lockedMonths.join("、")}。请先在月度回顾中重新打开。</p>}
+              {displayedImportSummary.conflicts.length > 0 && <ul className="mt-3 list-disc space-y-1 pl-4 text-[11px] leading-5 text-danger">{displayedImportSummary.conflicts.map((conflict, index) => <li key={`${index}:${conflict}`}>{conflict}</li>)}</ul>}
+            </div>}
+            <ImportPreviewStatus state={importState} busy={importing} disabled={!ready || importBlocked} onConfirm={() => void confirmImport()} onCancel={cancelImport} />
+            {importError && <p role="alert" className="mt-4 text-xs leading-6 text-danger">{importError}</p>}
+            <p className="mt-4 text-[10px] leading-5 text-muted">CSV 作为新账目追加；恢复完整账本请使用 JSON 备份。文件与请求最多 64 MiB。完整备份一次性恢复，校验失败时不写入任何数据。</p>
           </Card>
           <p className="flex items-start gap-2 px-2 text-[10px] leading-5 text-muted"><span className="mt-1 shrink-0"><Icon name="shield" size={13} /></span>这是一个单人账本，不含登录鉴权。请仅在本机或可信网络中使用。</p>
         </div>

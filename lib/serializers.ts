@@ -1,5 +1,5 @@
 import { dateOnlyKey } from "@/lib/domain";
-import type { CategoryDTO, TransactionDTO } from "@/lib/types";
+import type { CategoryDTO, SettlementCategorySnapshot, TransactionDTO } from "@/lib/types";
 import type { Category, Transaction } from "@prisma/client";
 
 /** Relations every transaction response needs in order to be serialized. */
@@ -28,12 +28,13 @@ export type CategoryLike = {
 
 /**
  * Whitelist a Prisma Transaction into the client-facing TransactionDTO.
- * Deliberately excludes internal fields (deletedAt, subscriptionOccurrenceKey,
- * timestamps) so they never leak to the client.
+ * Exposes the mutation version and deleted state for conflict handling and recovery.
  */
 export function serializeTransaction(transaction: TransactionWithRelations): TransactionDTO {
   return {
     id: transaction.id,
+    version: transaction.version,
+    deletedAt: transaction.deletedAt?.toISOString() ?? null,
     type: transaction.type,
     amountCents: transaction.amountCents,
     occurredOn: dateOnlyKey(transaction.occurredOn),
@@ -74,6 +75,8 @@ export function serializeSettlement(settlement: {
   remainingAmountCents: number | null;
   settledAt: Date;
   reopenedAt: Date | null;
+  revision?: number;
+  categorySnapshot?: unknown;
 }) {
   return {
     id: settlement.id,
@@ -84,5 +87,7 @@ export function serializeSettlement(settlement: {
     remainingAmountCents: settlement.remainingAmountCents,
     settledAt: settlement.settledAt.toISOString(),
     reopenedAt: settlement.reopenedAt ? settlement.reopenedAt.toISOString() : null,
+    revision: settlement.revision ?? 1,
+    categorySnapshot: settlement.categorySnapshot as SettlementCategorySnapshot[] | null ?? null,
   };
 }

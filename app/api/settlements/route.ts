@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { handleApiError } from "@/lib/api";
 import { addMonths, parseMonth, todayInShanghai } from "@/lib/domain";
 import { getMonthSummaries } from "@/lib/summary";
-import { syncSubscriptions } from "@/lib/subscriptions";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +13,6 @@ export async function GET(request: Request) {
     // include=focus returns the `end` month's full summary in the same response,
     // so the settlements page needs a single request instead of two.
     const includeFocus = url.searchParams.get("include") === "focus";
-    await syncSubscriptions();
     const months = Array.from({ length: 6 }, (_, index) => addMonths(end, index - 5));
     const summaries = await getMonthSummaries(months);
     // `end` is the last element, so focus reuses it instead of recomputing.

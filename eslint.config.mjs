@@ -10,7 +10,7 @@ const compat = new FlatCompat({ baseDirectory: dirname(fileURLToPath(import.meta
 const config = [
   // Agent tooling checks out scratch worktrees inside the repo directory
   // (.claude/.freebuff/.copilot); their code must never enter this project's lint.
-  { ignores: ["node_modules/**", ".next/**", ".next-*/**", ".vitest/**", "out/**", "prisma/migrations/**", "next-env.d.ts", ".claude/**", ".freebuff/**", ".copilot/**"] },
+  { ignores: ["node_modules/**", ".next/**", ".next-*/**", ".vitest/**", "out/**", "prisma/migrations/**", "next-env.d.ts", ".claude/**", ".freebuff/**", ".copilot/**", ".delta/**", ".entire/**", ".thinkrail/**", ".codex/**"] },
   ...compat.extends("next/core-web-vitals"),
   {
     files: ["**/*.{ts,tsx}"],

@@ -5,6 +5,7 @@ import { conflict, notFound } from "@/lib/errors";
 import { withLedgerWrite } from "@/lib/ledger-write";
 import { serializeSettlement } from "@/lib/serializers";
 import { invalidateSubscriptionSyncCache } from "@/lib/subscriptions";
+import { recordSettlementHistory } from "@/lib/settlement-history";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,9 @@ export async function POST(_request: Request, { params }: Context) {
       const existing = await tx.monthlySettlement.findUnique({ where: { month: monthStart(month) }, select: { reopenedAt: true } });
       if (!existing) throw notFound("这个月还没有结算，无需重新打开");
       if (existing.reopenedAt) throw conflict("这个月已经是打开状态");
-      return tx.monthlySettlement.update({ where: { month: monthStart(month) }, data: { reopenedAt: new Date() } });
+      const updated = await tx.monthlySettlement.update({ where: { month: monthStart(month) }, data: { reopenedAt: new Date(), revision: { increment: 1 } } });
+      await recordSettlementHistory(tx, updated, "reopen");
+      return updated;
     });
     // Occurrences skipped while the month was locked can now materialize, so a
     // cached sync run must not keep answering with the pre-reopen plan.

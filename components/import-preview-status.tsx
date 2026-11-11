@@ -30,17 +30,22 @@ export function ImportPreviewStatus({ state, busy, disabled, onConfirm, onCancel
     </Alert>
   );
   const { preview } = state.selection;
+  const issues = [
+    ...preview.errors,
+    ...(preview.summary?.conflicts ?? []),
+    ...(preview.summary?.lockedMonths.length ? [`已结算月份：${preview.summary.lockedMonths.join("、")}`] : []),
+  ];
   return (
-    <Alert className="mt-4" status={preview.errors.length ? "danger" : "success"}>
+    <Alert className="mt-4" status={issues.length ? "danger" : "success"}>
       <Alert.Indicator />
       <Alert.Content>
-        <Alert.Title>{preview.errors.length ? "文件需要修正" : "文件检查通过"}</Alert.Title>
+        <Alert.Title>{issues.length ? "文件或目标账本需要处理" : "文件检查通过"}</Alert.Title>
         <Alert.Description>{preview.valid} / {preview.total} 条记录可导入</Alert.Description>
-        {preview.errors.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-xs">
-          {preview.errors.slice(0, 5).map((item) => <li key={item}>{item}</li>)}
+        {issues.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-xs">
+          {[...new Set(issues)].slice(0, 5).map((item) => <li key={item}>{item}</li>)}
         </ul>}
         <div className="mt-3 flex flex-wrap gap-2">
-          {!preview.errors.length && <Button size="sm" onPress={onConfirm} isPending={busy} isDisabled={disabled || busy}>确认导入</Button>}
+          {!issues.length && <Button size="sm" onPress={onConfirm} isPending={busy} isDisabled={disabled || busy}>确认导入</Button>}
           <Button size="sm" variant="ghost" isDisabled={busy} onPress={onCancel}>取消</Button>
         </div>
       </Alert.Content>

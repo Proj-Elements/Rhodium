@@ -13,6 +13,19 @@ function jsonRequest(body: string, headers: Record<string, string> = {}): Reques
 }
 
 describe("parseJsonBody", () => {
+  it.each(["text/plain", "application/x-www-form-urlencoded", "application/merge-patch+json"])("rejects JSON sent as %s", async (contentType) => {
+    await expect(parseJsonBody(jsonRequest("{}", { "content-type": contentType }))).rejects.toMatchObject({ status: 415 });
+  });
+
+  it("rejects an absent Content-Type", async () => {
+    const request = jsonRequest("{}");
+    request.headers.delete("content-type");
+    await expect(parseJsonBody(request)).rejects.toMatchObject({ status: 415 });
+  });
+
+  it("accepts the JSON media type with charset parameters", async () => {
+    await expect(parseJsonBody(jsonRequest("{}", { "content-type": "Application/JSON; charset=utf-8" }))).resolves.toEqual({});
+  });
   it("parses a normal JSON body", async () => {
     await expect(parseJsonBody(jsonRequest('{"amount":"12.50"}'))).resolves.toEqual({ amount: "12.50" });
   });
@@ -43,7 +56,7 @@ describe("parseJsonBody", () => {
       },
       cancel,
     }, { highWaterMark: 0 });
-    const request = new Request("http://localhost/api/test", { method: "POST", body, duplex: "half" } as RequestInit);
+    const request = new Request("http://localhost/api/test", { method: "POST", headers: { "content-type": "application/json" }, body, duplex: "half" } as RequestInit);
     await expect(parseJsonBody(request, 64)).rejects.toMatchObject({ status: 413 });
     expect(pulled).toBe(3);
     expect(cancel).toHaveBeenCalledOnce();
@@ -58,7 +71,7 @@ describe("parseJsonBody", () => {
         else controller.close();
       },
     });
-    const request = new Request("http://localhost/api/test", { method: "POST", body, duplex: "half" } as RequestInit);
+    const request = new Request("http://localhost/api/test", { method: "POST", headers: { "content-type": "application/json" }, body, duplex: "half" } as RequestInit);
     await expect(parseJsonBody(request)).resolves.toEqual({ note: "午饭" });
   });
 

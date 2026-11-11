@@ -1,5 +1,5 @@
 import path from "node:path";
-import { defineConfig } from "vitest/config";
+import { defaultExclude, defineConfig } from "vitest/config";
 import { requireTestDatabase } from "./lib/test-database";
 
 /**
@@ -19,6 +19,7 @@ export default defineConfig({
     environment: "node",
     globals: true,
     include: ["tests/integration/**/*.test.ts"],
+    exclude: [...defaultExclude, ".claude/**", ".freebuff/**", ".copilot/**", ".delta/**", ".entire/**", ".thinkrail/**", ".codex/**"],
     env: { DATABASE_URL: databaseUrl, TEST_DATABASE_URL: databaseUrl },
     pool: "forks",
     maxWorkers: 1,

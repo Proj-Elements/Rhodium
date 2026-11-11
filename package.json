@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3030",
+    "dev": "next dev --hostname 127.0.0.1 -p 3030",
     "build": "prisma generate && next build",
-    "start": "next start -p 3030",
+    "start": "next start --hostname 127.0.0.1 -p 3030",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

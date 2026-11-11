@@ -6,10 +6,14 @@ export type CategoryDTO = {
   isSystem: boolean;
   sortOrder: number;
   archivedAt: string | null;
+  billingPauses?: { start: string; end: string | null }[];
 };
 
 export type TransactionDTO = {
   id: string;
+  version: number;
+  deletedAt: string | null;
+  monthLocked?: boolean;
   type: "EXPENSE" | "INCOME";
   amountCents: number;
   occurredOn: string;
@@ -28,9 +32,11 @@ export type DashboardDTO = {
   today: string;
   focusDate: string;
   monthStatus: "past" | "current" | "future";
+  locked: boolean;
+  readOnly: boolean;
   budget: { amountCents: number } | null;
   /** Where the effective budget comes from: explicit month row, preset, or unset. */
-  budgetSource: "month" | "preset" | "none";
+  budgetSource: "month" | "preset" | "none" | "settlement";
   expenseCents: number;
   /** 本月未被报销的支出总额（报销属于回收，不算花掉）。 */
   outOfPocketCents: number;
@@ -63,4 +69,26 @@ export type SubscriptionDTO = {
   endMonth: string | null;
   active: boolean;
   note: string | null;
+  billingPauses: { start: string; end: string | null }[];
+  billingHistory: {
+    effectiveMonth: string;
+    amountCents: number;
+    billingDay: number;
+    categoryId: string;
+    name: string;
+    note: string | null;
+    startMonth: string;
+    endMonth: string | null;
+  }[];
+  billingEffectiveMonth: string | null;
+  currentAmountCents: number | null;
+  currentCategory: CategoryDTO | null;
+};
+
+export type SettlementCategorySnapshot = {
+  categoryId: string;
+  categoryName: string;
+  expenseCents: number;
+  outOfPocketCents: number;
+  incomeCents: number;
 };

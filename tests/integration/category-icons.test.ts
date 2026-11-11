@@ -56,9 +56,11 @@ describe("category icon backups", () => {
     expect(backup.categories).toContainEqual(expect.objectContaining({ id: category.id, icon: "coffee" }));
 
     await resetDatabase();
+    const localCategory = await prisma.category.create({ data: { name: "Coffee", icon: "leaf" } });
     const restored = await importLedger(jsonRequest("/api/import", "POST", { format: "json", rows: backup.transactions, backup }));
     expect(restored.status).toBe(200);
     const restoredCategory = await prisma.category.findFirstOrThrow({ where: { name: "Coffee" } });
+    expect(restoredCategory.id).toBe(localCategory.id);
     expect(restoredCategory.id).not.toBe(category.id);
     expect(restoredCategory.icon).toBe("coffee");
 
@@ -87,6 +89,6 @@ describe("category icon backups", () => {
     expect(response.status).toBe(200);
     expect((await prisma.category.findUniqueOrThrow({ where: { id: category.id } })).icon).toBeNull();
     const csv = await exportLedger(new Request("http://localhost/api/export?format=csv"));
-    expect((await csv.text()).replace(/^\uFEFF/, "").split(/\r?\n/)[0]).toBe('"日期","类型","金额","分类","备注","来源"');
+    expect((await csv.text()).replace(/^\uFEFF/, "").split(/\r?\n/)[0]).toBe('"日期","类型","金额","分类","备注","来源","报销时间","__rhodium_csv_encoding"');
   });
 });

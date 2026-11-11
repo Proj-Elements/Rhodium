@@ -31,6 +31,7 @@ model Category {
   isSystem      Boolean        @default(false)
   sortOrder     Int            @default(0)
   archivedAt    DateTime?
+  billingPauses Json           @default("[]")
   transactions  Transaction[]
   subscriptions Subscription[]
   createdAt     DateTime       @default(now())
@@ -57,6 +58,7 @@ model Transaction {
   /// 报销时间：已报销的支出保留在账本里，但不再计入本月支出与预算；
   /// 置空即撤销报销。不建索引——聚合查询由 [type, deletedAt, occurredOn] 先收敛。
   reimbursedAt              DateTime?
+  version                   Int               @default(1)
   createdAt                 DateTime          @default(now())
   updatedAt                 DateTime          @updatedAt
 
@@ -79,6 +81,8 @@ model Subscription {
   startMonth   DateTime      @db.Date
   endMonth     DateTime?     @db.Date
   active       Boolean       @default(true)
+  billingPauses Json         @default("[]")
+  billingHistory Json        @default("[]")
   note         String?
   transactions Transaction[]
   createdAt    DateTime      @default(now())
@@ -112,6 +116,40 @@ model MonthlySettlement {
   remainingAmountCents Int?
   settledAt            DateTime  @default(now())
   reopenedAt           DateTime?
+  revision             Int       @default(1)
+  categorySnapshot     Json?
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
+}
+
+model CreationRequest {
+  key         String   @id
+  requestHash String
+  response    Json
+  createdAt   DateTime @default(now())
+}
+
+model TransactionHistory {
+  id            String   @id @default(cuid())
+  transactionId String
+  version       Int
+  action        String
+  before        Json?
+  after         Json
+  recordedAt    DateTime @default(now())
+
+  @@unique([transactionId, version])
+  @@index([transactionId, recordedAt])
+}
+
+model SettlementHistory {
+  id         String   @id @default(cuid())
+  month      DateTime @db.Date
+  revision   Int
+  action     String
+  snapshot   Json
+  recordedAt DateTime @default(now())
+
+  @@unique([month, revision])
+  @@index([month, recordedAt])
 }

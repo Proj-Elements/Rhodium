@@ -16,16 +16,17 @@ curl -fsSL $BASE/api/health       # 正常返回 {"status":"ok","database":"ok"}
 
 - 503 = 应用活着但数据库不可达；连接失败 = 应用没启动或端口不同，让用户启动应用。自检一次即可，之后不要轮询。
 - 无鉴权：应用没有任何登录保护，只应绑定回环地址使用，不要把地址转发给不可信网络。
-- 限流（按分钟滑动窗口）：读 600 次、写 120 次、`/api/import*` 12 次。触发返回 429 与 `Retry-After` 响应头，等那么多秒再重试；批量写入时把请求间隔开。
+- 限流使用进程内固定窗口：读 600 次/分钟、写 120 次/分钟、`/api/import*` 12 次/分钟，重启会重置计数。触发返回 429 与 `Retry-After` 响应头，等那么多秒再重试；批量写入时把请求间隔开。
+- 写请求统一使用 `Content-Type: application/json`。本机 CLI 无需伪造 `Origin` 或转发地址；自定义访问域名必须先配置允许的 Host，浏览器跨站请求会被拒绝。这些检查不能代替登录鉴权。
 
 ## 1. 动手前先记住四条硬规则
 
-1. **金额方向相反**：请求体用「元」的字符串或数字（如 `"24.50"`）；响应里的 `amountCents` 一律是整数「分」——展示给用户前必须除以 100 格式化成 ¥24.50，永远不要把分值原样当金额播报。单笔上限 2,000,000,000 分（两千万元），负数会被 400 拒绝。
+1. **请求用元，响应用分**：请求体用明确的十进制金额（推荐字符串 `"24.50"`）；响应里的 `amountCents` 一律是整数「分」——展示给用户前必须除以 100 格式化成 ¥24.50，永远不要把分值原样当金额播报。单笔上限 2,000,000,000 分（两千万元）；不传负数或 `"0x10"`、`"1e3"`、`"1,2,3"` 这类金额文本。
 2. **日期是严格日历**：`occurredOn` 必须 `YYYY-MM-DD`（`2025-02-30` 会被 400 拒绝）；月份一律 `YYYY-MM`；「今天 / 当月」按 `Asia/Shanghai` 计算。
 3. **请求小写、响应大写**：账目类型请求传 `"expense"`/`"income"`，响应是 `"EXPENSE"`/`"INCOME"`；分类类型请求 `expense|income|both`，响应 `EXPENSE|INCOME|BOTH`。
 4. **已结算月份只读**：对锁定月份的账目做任何写操作都会 409「本月已经结算，请先重新打开本月」。不要擅自解锁——停下询问用户，得到同意后再 `POST /api/settlements/{month}/reopen`（解除快照保护是用户的决策）。
 
-其余约定：账目是软删除（`DELETE` 后数据仍在，可 PATCH `{"restore":true}` 恢复）；分类没有删除，用 `{"archived":true}` 停用，停用后不再出现在记账选择里但历史账目保留；支出一键报销用 PATCH `{"reimburse":true}`（响应带 `reimbursedAt`）——仪表盘的 `expenseCents`/`outOfPocketCents` 不含已报销支出，月度回顾的 `expenseCents` 保留账面全额、`outOfPocketCents` 才是自付额，预算与剩余按自付额计算；`reimbursedCents`/`reimbursedCount` 单列报销。报销是会计事实，可用 `{"unreimburse":true}` 撤销；完整编辑（PATCH 全部字段）也会撤销报销，删除/恢复与 JSON 备份还原保留报销状态。
+其余约定：账目是软删除，`DELETE` 后可恢复；分类没有删除，用 `{"archived":true}` 停用，历史账目保留。仪表盘的 `expenseCents`/`outOfPocketCents` 不含已报销支出，月度回顾的 `expenseCents` 保留账面全额，`outOfPocketCents` 才是自付额，预算与剩余按自付额计算；`reimbursedCents`/`reimbursedCount` 单列报销。备注与分类编辑保留报销；修改已报销账目的金额、日期或方向前需先明确撤销报销。删除、恢复与 JSON 备份还原均保留报销事实。
 
 ## 2. 任务路由：什么问题打哪个接口
 
@@ -53,7 +54,7 @@ curl -fsSL $BASE/api/dashboard            # 当月；?month=2026-09 看指定月
 
 - 花了多少 → `expenseCents` / `incomeCents`（记得除以 100）。
 - 有报销 → `reimbursedCents` / `reimbursedCount` 是已报销金额与笔数，已从 `expenseCents` 与预算口径中排除；报销可随时撤销（见 §3.4）。
-- 预算够不够 → `remainingCents`、`usagePercent`；`budget`（`{amountCents}` 或 null）配合 `budgetSource`：`month`=本月显式预算、`preset`=全局预设兜底、`none`=未设预算。
+- 预算够不够 → `remainingCents`、`usagePercent`；`budget`（`{amountCents}` 或 null）配合 `budgetSource`：`month`=本月显式预算、`preset`=全局预设兜底、`settlement`=已结算月份的冻结预算、`none`=未设预算。预算为 0 是明确设置，不等于未设预算。
 - 钱花在哪 → `categoryBreakdown`（分类排行，按金额降序，不含报销）。
 - 近期走势 → `recentExpenses` 最近 7 天逐日支出（不含报销）；日均 = `expenseCents / daysElapsed`（`daysElapsed`/`daysInMonth` 为已过/总天数，只有当月 `daysElapsed` 小于总天数）。
 - 刚花了什么 → `recentTransactions` 最近 10 笔；`focusDateExpenseCents` 当日支出。
@@ -61,11 +62,15 @@ curl -fsSL $BASE/api/dashboard            # 当月；?month=2026-09 看指定月
 ### 3.2 查某月账目清单
 
 ```bash
-curl -fsSL "$BASE/api/transactions?month=2026-09"              # 全部
+curl -fsSL "$BASE/api/transactions?month=2026-09"              # 该月第一页
 curl -fsSL "$BASE/api/transactions?month=2026-09&type=expense" # 只看支出
+curl -fsSL "$BASE/api/transactions?month=all&q=%E5%8D%88%E9%A5%AD" # 跨月搜索“午饭”
+curl -fsSL "$BASE/api/transactions?month=all&deleted=only"     # 回收站
 ```
 
-返回 `{month, readOnly, transactions: TransactionDTO[]}`，按日期倒序。`readOnly=true` 表示该月已结算锁定。
+返回 `{month, readOnly, transactions, nextCursor, summary}`，按日期、创建时间、ID 倒序。默认每页 500 条，`limit` 可设 1–2000；`nextCursor` 非 null 时，将其原样传入下一页的 `cursor`，其他筛选条件保持一致。不能把第一页当作完整清单。`summary` 汇总所有匹配项而非当前页，含 `transactionCount`、账面 `expenseCents`、自付 `outOfPocketCents`、`incomeCents`、`reimbursedCents`、`reimbursedCount`。
+
+`month=all` 跨月查询，`q`（最多 200 字）搜索备注、分类名和订阅名，`categoryId` 进一步筛分类；`deleted=only` 仅查软删除行，默认排除删除行。`readOnly=true` 表示指定月已锁定，跨月时分别查看每行的 `monthLocked`，不能因为顶层 `readOnly=false` 就修改已结算行。
 
 ### 3.3 记一笔
 
@@ -73,43 +78,50 @@ curl -fsSL "$BASE/api/transactions?month=2026-09&type=expense" # 只看支出
 # 第 1 步：拿分类（首次调用会自动播种默认分类）。archivedAt 非 null 的已停用，不要选
 curl -fsSL $BASE/api/categories
 
-# 第 2 步：写入。type 决定 categoryId 必须是可用于该方向的分类
+# 第 2 步：为这次记账生成并保存一个唯一请求键；不确定结果时用原键和原请求重试
+REQUEST_KEY=$(uuidgen)
+# type 决定 categoryId 必须是可用于该方向的分类
 curl -fsSL -X POST $BASE/api/transactions -H 'content-type: application/json' \
+  -H "Idempotency-Key: $REQUEST_KEY" \
   -d '{"type":"expense","amount":"24.50","occurredOn":"2026-09-05","categoryId":"<分类id>","note":"午饭"}'
 # 201 {"transaction": TransactionDTO}
 ```
 
 完整示例——用户说「午饭 24 块 5」：查分类列表按名字匹配到「餐饮」的 id（匹配不到合适的就先建，见 §3.9），执行上面的 POST（`amount:"24.50"`，`occurredOn` 用上海时区的今天），然后照这样汇报：「已记：餐饮 ¥24.50（09-05），本月共支出 ¥xxxx.xx」。`note` 可选、≤200 字。
 
-POST 没有幂等键：如果请求超时或结果不确定，先 `GET /api/transactions?month=` 查一遍再决定重试，避免重复入账。
+`Idempotency-Key` 为 8–128 个字母、数字或 `._:-`，UUID 符合要求。旧 CLI 可省略，但本技能始终为新操作生成并保存它。请求超时或结果不确定时，沿用同一键和同一内容重试，不要生成新键。相同键和归一化内容返回原 201 JSON，并以 `Idempotent-Replay: true` 标识重放；相同键配不同内容返回 409。键无过期时间，并随完整备份保存。
+
+重放返回的是创建时的响应快照，即使该账目后来被修改、删除或结算，也不会再创建一笔。需要最新状态时另查账目。用户改变金额等内容时应视为新操作并生成新键。
 
 ### 3.4 修改 / 删除 / 恢复账目
 
 ```bash
-# 修改：body 必须携带与 POST 相同的全部字段（note 可省略），不支持只传部分字段的补丁
+# 先 GET 清单拿到当前 version。修改必须携带全部编辑字段和 expectedVersion
 curl -fsSL -X PATCH $BASE/api/transactions/<id> -H 'content-type: application/json' \
-  -d '{"type":"expense","amount":"30.00","occurredOn":"2026-09-05","categoryId":"<分类id>","note":"改价"}'
+  -d '{"expectedVersion":1,"type":"expense","amount":"30.00","occurredOn":"2026-09-05","categoryId":"<分类id>","note":"改价"}'
 
 # 删除（软删除）
-curl -fsSL -X DELETE $BASE/api/transactions/<id>    # {"id":"...","deleted":true}
+curl -fsSL -X DELETE "$BASE/api/transactions/<id>?expectedVersion=1" -H 'content-type: application/json'
 
 # 恢复（仅限已软删除的行，否则 409）
-curl -fsSL -X PATCH $BASE/api/transactions/<id> -H 'content-type: application/json' -d '{"restore":true}'
+curl -fsSL -X PATCH $BASE/api/transactions/<id> -H 'content-type: application/json' -d '{"restore":true,"expectedVersion":2}'
 
 # 报销（仅支出；已删除行 409「这条账目已被删除，无法报销」；收入行 409「只有支出才能标记报销」）
-curl -fsSL -X PATCH $BASE/api/transactions/<id> -H 'content-type: application/json' -d '{"reimburse":true}'
-# 撤销报销：仅清空时间戳，不改金额、日期、分类；完整编辑也会撤销报销
-curl -fsSL -X PATCH $BASE/api/transactions/<id> -H 'content-type: application/json' -d '{"unreimburse":true}'
+curl -fsSL -X PATCH $BASE/api/transactions/<id> -H 'content-type: application/json' -d '{"reimburse":true,"expectedVersion":3}'
+# 撤销报销：只清空报销时间戳，不改金额、日期、分类
+curl -fsSL -X PATCH $BASE/api/transactions/<id> -H 'content-type: application/json' -d '{"unreimburse":true,"expectedVersion":4}'
 ```
 
-三个边角行为：restore 的 body 必须只有 `{"restore":true}`，混入其他字段 400；已软删除的行不能直接编辑（409），先 restore；restore 会重新校验分类，分类已归档或类型不匹配时 400「请选择有效的分类」。
+上面的版本号仅为示例，每次操作都使用最新响应或清单里的 `version`。版本不匹配会返回 409，先重新读取并向用户说明冲突，再根据用户意图处理，不能自动覆盖其他编辑。
 
-报销与撤销报销的 body 分别只能有 `{"reimburse":true}` 或 `{"unreimburse":true}`（混入其他操作或完整编辑字段也会 400）；重复操作幂等返回 200。两种操作都只允许未删除、未锁定月份内的支出，收入或已删除行返回 409；不存在的 id 返回 404。
+删除响应包含 `{id, deleted, version, transaction}`。如需解释改动来源，读取 `GET /api/transactions/{id}/history`：`history` 按版本倒序，记录 `version`、`action`、`before`、`after` 和 `recordedAt`，快照保留当时分类名。只解释已保存的记录；旧数据没有记录不代表从未被编辑。
+
+恢复、报销、撤销报销的 body 只能包含一个动作键和 `expectedVersion`，混入其他动作或完整编辑字段返回 400。已软删除行不能直接编辑，先恢复；恢复会重新校验分类，分类已归档或类型不匹配时返回 400。报销和撤销报销仅允许未删除、未锁定月份内的支出，收入或已删除行返回 409，不存在的 id 返回 404。
 
 ### 3.5 预算
 
 ```bash
-# 查某月预算：budget=显式月预算，preset=全局预设，effectiveBudgetCents=实际生效值
+# 查某月预算：source 解释有效值来源，locked 表示已冻结；已结算月采用快照预算
 curl -fsSL $BASE/api/budgets/2026-09
 
 # 设本月显式预算
@@ -120,7 +132,7 @@ curl -fsSL -X PUT "$BASE/api/budgets/2026-09?scope=future" -H 'content-type: app
 # 响应含 monthsSet 与 throughMonth
 
 # 删某月显式预算（该月回落到 preset）
-curl -fsSL -X DELETE $BASE/api/budgets/2026-09
+curl -fsSL -X DELETE $BASE/api/budgets/2026-09 -H 'content-type: application/json'
 
 # 全局预设：所有没有显式预算的月份的默认值
 curl -fsSL $BASE/api/budgets/preset
@@ -137,14 +149,16 @@ curl -fsSL $BASE/api/settlements/2026-09          # {"summary": {...}}
 curl -fsSL "$BASE/api/settlements?end=2026-09&include=focus"
 ```
 
-summary 字段：`budgetCents`/`budgetSource`/`expenseCents`（账面支出，含报销）/`outOfPocketCents`（自付额）/`reimbursedCents`/`reimbursedCount`/`incomeCents`/`remainingCents`（预算减自付额）、`subscriptionExpenseCents`（订阅产生的支出）、`topCategory`/`topDate`（单日最高，按账面全额）、`dailyBreakdown`（每天 `{date,expenseCents,incomeCents,transactionCount}`）、`dailyAverageCents`（自付额日均）、`transactionCount`（全部账目数）、`expenseTransactionCount`（仅支出笔数）、`settlement`（已结算快照或 null）。
+summary 字段：`budgetCents`/`budgetSource`/`expenseCents`（账面支出，含报销）/`outOfPocketCents`（自付额）/`reimbursedCents`/`reimbursedCount`/`incomeCents`/`remainingCents`（预算减自付额）、`subscriptionExpenseCents`（订阅产生的支出）、`topCategory`/`topDate`（单日最高，按账面全额）、`dailyBreakdown`（每天 `{date,expenseCents,incomeCents,transactionCount}`）、`dailyAverageCents`（自付额日均）/`grossDailyAverageCents`（账面支出日均）、`transactionCount`（全部账目数）、`expenseTransactionCount`（仅支出笔数）、`settlement`（已结算快照或 null）。
 
 结算与重开是冻结/解除冻结数据的操作，**执行前用一句话向用户复述要做的事**：
 
 ```bash
-curl -fsSL -X POST $BASE/api/settlements/2026-09/settle   # 快照并锁定该月（未来月份 400）
-curl -fsSL -X POST $BASE/api/settlements/2026-09/reopen   # 重新打开；未结算 404，已打开 409
+curl -fsSL -X POST $BASE/api/settlements/2026-09/settle -H 'content-type: application/json'   # 快照并锁定该月（未来月份 400）
+curl -fsSL -X POST $BASE/api/settlements/2026-09/reopen -H 'content-type: application/json'   # 重新打开；未结算 404，已打开 409
 ```
+
+结算保存分类名称及账面支出、自付额、收入的分类快照，重开和重新结算产生新修订，旧修订保留。`GET /api/settlements/{month}/history` 返回 `{history:[{id,month,revision,action,snapshot,recordedAt}]}`，用于解释已经保存的结算变化。
 
 ### 3.7 固定支出（订阅）
 
@@ -158,35 +172,49 @@ curl -fsSL -X POST $BASE/api/subscriptions -H 'content-type: application/json' \
 curl -fsSL -X PATCH $BASE/api/subscriptions/<id> -H 'content-type: application/json' -d '{"active":false}'
 
 # 删除：已有历史账目时只暂停不真删（响应 archived:true），避免账目失去关联
-curl -fsSL -X DELETE $BASE/api/subscriptions/<id>
+curl -fsSL -X DELETE $BASE/api/subscriptions/<id> -H 'content-type: application/json'
 
-# 立刻补记到期的订阅账目（通常不用手动调，页面访问会自动触发；补录历史时显式调一次）
-curl -fsSL -X POST $BASE/api/subscriptions/sync     # {"created":n,"syncedThrough":"YYYY-MM-DD"}
+# 显式补记到期的订阅账目；GET 查询不会触发订阅补记
+curl -fsSL -X POST $BASE/api/subscriptions/sync -H 'content-type: application/json'
+# {"created":n,"syncedThrough":"YYYY-MM-DD", ...}
 ```
 
-服务端对 sync 有 60 秒去抖缓存，重复调用直接返回上次结果；增删改订阅或重开月份会使缓存立即失效。
+暂停、恢复按当天的 `[开始日, 恢复日)` 记录，扣款日落在暂停区间内的账目不会在恢复后补记，分类停用期间同理。金额、扣款日、分类和起止月份变更默认下月生效，当前月继续沿用原计划；尚未开始的未来计划可编辑未来生效内容，已经产生的历史账目不会被改价。
+
+响应包含 `billingEffectiveMonth`（最新计划生效月）、`currentAmountCents`（当月有效价格或 null）、`billingHistory` 与 `billingPauses`。旧数据或没有历史字段的旧备份无法还原过去价格，服务端从迁移/导入当月建立可靠计划并跳过无法确定的历史缺口。sync 的 `skippedUnknownHistory` 与 `historyWarnings[{subscriptionId,knownFrom}]` 必须如实告知用户，不能把未补记的缺口当作没有消费。
+
+服务端对 sync 有 60 秒缓存，增删改订阅或重开月份会使缓存失效。页面可先显式同步再刷新；同步失败仍可读取已有账目。
 
 ### 3.8 导入 / 导出
 
 ```bash
-# 导出：JSON 完整备份（含全部分类/预算/订阅/结算）或账目 CSV
+# 导出：JSON 完整备份，或用于表格查看的账目 CSV
 curl -fsSL "$BASE/api/export?format=json" -o backup.json
 curl -fsSL "$BASE/api/export?format=csv"  -o transactions.csv
 
-# 导入前先预检（不写库）：返回 total/valid/errors
-curl -fsSL -X POST $BASE/api/import/preview -H 'content-type: application/json' -d @import.json
+# 完整恢复仅传一次 envelope，不同时发送 rows 与 backup.transactions
+node -e 'const fs=require("node:fs"); const backup=JSON.parse(fs.readFileSync("backup.json","utf8")); fs.writeFileSync("restore-request.json",JSON.stringify({backup}));'
 
-# 导入（同事务、要么全成要么全不动；≤20000 行 / 8MB；rows 可为空数组，只还原 backup 里的分类/订阅/预算/结算）
-curl -fsSL -X POST $BASE/api/import -H 'content-type: application/json' -d @import.json   # {"imported": n}
+# 先预检（不写库），读 errors、summary.lockedMonths 与 summary.conflicts
+curl -fsSL -X POST $BASE/api/import/preview -H 'content-type: application/json' --data-binary @restore-request.json
+
+# 确认变更摘要后恢复；同一事务内重校验，要么全成要么全不动
+curl -fsSL -X POST $BASE/api/import -H 'content-type: application/json' --data-binary @restore-request.json
+# {"imported": n, "summary": {...}}
 ```
 
-导入行字段（中英文键等价）：`occurredOn`/`日期`（YYYY-MM-DD）、`amount`/`金额`（元）或 `amountCents`（分）、`type`/`类型`（`expense`/`income`，也接受 `支出`/`收入`）、`category`/`分类`（按名字匹配，缺省落「其他」）、`note`/`备注`。任何一行落在已锁定月份则整个请求 409。
+普通追加导入使用 `{"format":"json","rows":[...]}`；CSV 需先解析为表头对应的行对象，再使用 `{"format":"csv","rows":[...]}`。导入行字段（中英文键等价）：`occurredOn`/`日期`（YYYY-MM-DD）、`amount`/`金额`（元）或 `amountCents`（分）、`type`/`类型`（`expense`/`income`，也接受 `支出`/`收入`）、`category`/`分类`（按名字匹配，缺省落「其他」）、`note`/`备注`。普通备注不超过 200 字。
+
+两个接口都限制 UTF-8 请求体不超过 64 MiB。普通追加单次最多 20,000 行；完整备份每类实体最多 100,000 条。JSON 导出检查相同恢复边界，超限会明确报错，不能把失败响应当作成功备份。完整备份不可拆批恢复：账目、预算、订阅历史和结算锁需要在同一事务中验证。超限时使用 PostgreSQL 数据库备份。
 
 合并语义决定选哪种格式，别弄错：
 
-- **裸行列表**（无 `backup` 字段）：一律新插入，行内 `id` 被忽略，不可能覆盖已有账目。所以把导出的 CSV 再导回去就是重复入账；提示用户，整体还原要用 JSON 完整备份。
-- **完整备份**（`backup` 字段 = export 的 JSON）：按自然键合并（分类按 名称+类型，订阅按名称，预算/结算按月份）；账目行带 `id` 时按 id upsert 且保留 createdAt。
-- 行多或没把握时永远先打 preview；用完整备份还原整本账之前向用户确认。
+- **普通行列表**（无 `backup` 字段）：一律新插入，行内 `id` 被忽略。所以把 CSV 再导回去会重复入账；整体还原必须用 JSON 完整备份。
+- **完整备份**（`backup` 字段为导出的 JSON）：当前导出版本为 2，恢复支持版本 1、2，其他版本拒绝。分类按名称和类型合并，订阅与交易按稳定 ID 恢复，预算和结算按月份合并。保留账目创建时间、更新时间、版本以及可用的暂停、价格和审计历史。
+- **结算一致性**：已有锁定月份不能覆盖。备份中的关闭快照必须与合并后账目的支出、收入、报销及预算净额一致，否则返回 409 并回滚全部写入。不能以分批导入绕开验证。
+- **预检摘要**：`summary.transactions` 给出 `create`、`update`、`unchanged` 数量，`categories`、`subscriptions`、`budgets`、`settlements` 各给出 `create`、`update`；`lockedMonths` 和 `conflicts` 列出阻塞。正式导入会在事务中重新计算，预检后其他请求可能改变账本，预检通过不保证后续导入一定成功。
+- **CSV 用途**：导出只包含未删除账目，包含报销时间，不包含完整预算、订阅及结算历史。Rhodium 用 `__rhodium_csv_encoding=apostrophe-v1` 标记安全公式转义，回导时只对带此标记的行还原；第三方 CSV 不猜测或删除原始前导单引号。不要删除此标记列。未闭合引号和重复表头会被拒绝。
+- 行多或没把握时先 preview，并向用户说明新增、覆盖和冲突数量；完整恢复的授权应覆盖实际预检结果。
 
 ### 3.9 分类
 
@@ -207,9 +235,11 @@ curl -fsSL -X PATCH $BASE/api/categories/<id> -H 'content-type: application/json
 | 状态码 | 含义 | 怎么办 |
 |---|---|---|
 | 400 | 参数不合法（`details` 是字段级错误） | 按 details 改字段重试；常见：日期非法、金额为负或超限、分类方向不匹配 |
+| 403 | Host、来源或浏览器访问上下文不允许 | 检查实际访问地址与部署白名单，不伪造来源绕过检查 |
 | 404 | id 或月份不存在 | 先 GET 列表核对真实 id，不要猜 |
-| 409 | 冲突：月份已锁定 / 编辑软删除行 / restore 未删除行 / 名称重复 / 分类仍被账目引用 | 锁定月→询问用户是否 reopen；软删除行→先 `{"restore":true}`；其余把 error 原话反馈给用户 |
-| 413 | 请求体过大 | 导入切批（单次 ≤20000 行 / 8MB） |
+| 409 | 月份锁定、版本过期、幂等键内容冲突、结算与合并账目不一致等 | 重新读取并说明具体冲突；不自动覆盖，不自动重开月份 |
+| 413 | 请求体过大 | 普通追加可在确认重复风险后分批，每批最多 20,000 行且不超过 64 MiB；完整备份不能拆批，应使用数据库备份 |
+| 415 | JSON 请求缺少正确媒体类型 | 补上 `Content-Type: application/json` 后按原操作重试 |
 | 429 | 限流 | 等响应头 `Retry-After` 秒数后重试 |
 
 ## 5. API 速查表
@@ -218,16 +248,18 @@ curl -fsSL -X PATCH $BASE/api/categories/<id> -H 'content-type: application/json
 |---|---|
 | GET /api/health | 健康检查 |
 | GET /api/dashboard?month= | 当月/指定月总览 |
-| GET /api/transactions?month=&type= | 账目清单（type 可省略） |
-| POST /api/transactions | 记账 `{type,amount,occurredOn,categoryId,note?}` → 201 |
-| PATCH /api/transactions/{id} | 修改（同 POST 全部字段）、`{"restore":true}` 恢复、`{"reimburse":true}` 报销或 `{"unreimburse":true}` 撤销报销 |
-| DELETE /api/transactions/{id} | 软删除 |
-| GET /api/budgets/{month} | `{budget,preset,effectiveBudgetCents}` |
+| GET /api/transactions?month=&type=&q=&deleted=&cursor= | 分页账目、跨月搜索和回收站；`month=all` 跨月，`deleted=only` 查删除项 |
+| POST /api/transactions | 记账 `{type,amount,occurredOn,categoryId,note?}`，带 `Idempotency-Key` |
+| PATCH /api/transactions/{id} | 完整编辑或单个恢复/报销/撤销报销动作，均携带 `expectedVersion` |
+| DELETE /api/transactions/{id}?expectedVersion= | 按当前版本软删除 |
+| GET /api/transactions/{id}/history | 已保存的账目变更快照 |
+| GET /api/budgets/{month} | `{budget,preset,effectiveBudgetCents,source,locked}` |
 | PUT /api/budgets/{month}?scope=month\|future | 设置显式预算（future 含 240 个月） |
 | DELETE /api/budgets/{month} | 删除显式预算 |
 | GET/PUT /api/budgets/preset | 全局预设预算 `{amount}` |
 | GET /api/settlements?end=&include=focus | 近 6 个月趋势 |
 | GET /api/settlements/{month} | 单月完整分析 `{summary}` |
+| GET /api/settlements/{month}/history | 按修订倒序的结算历史 |
 | POST /api/settlements/{month}/settle | 结算并锁定（需用户确认） |
 | POST /api/settlements/{month}/reopen | 重开已结算月份（需用户确认） |
 | GET/POST /api/categories | 列表（自动播种）/ 新建 `{name,type}` → 201 |
@@ -237,21 +269,26 @@ curl -fsSL -X PATCH $BASE/api/categories/<id> -H 'content-type: application/json
 | DELETE /api/subscriptions/{id} | 删除，有历史账目时改为归档 |
 | POST /api/subscriptions/sync | 补记到期订阅 |
 | POST /api/import/preview | 导入预检（不写库） |
-| POST /api/import | 导入（≤20000 行） |
+| POST /api/import | 原子恢复 `{backup}` 或追加 `{format,rows}`；返回写入数与变更摘要 |
 | GET /api/export?format=json\|csv | 全量备份 / CSV |
 
 ## 6. 数据结构
 
 ```jsonc
 TransactionDTO = {
-  id, type: "EXPENSE"|"INCOME", amountCents: number,
-  occurredOn: "YYYY-MM-DD", note: string|null,
+  id, version: number, type: "EXPENSE"|"INCOME", amountCents: number,
+  occurredOn: "YYYY-MM-DD", note: string|null, deletedAt: ISO|null,
   category: CategoryDTO, source: "MANUAL"|"SUBSCRIPTION",
   subscriptionId: string|null, subscriptionMonth: "YYYY-MM"|null,
-  reimbursedAt: ISO|null   # 非空 = 已报销
+  reimbursedAt: ISO|null   // 非空 = 已报销
 }
 CategoryDTO = { id, name, type: "EXPENSE"|"INCOME"|"BOTH", isSystem, sortOrder, archivedAt: ISO|null }
-SubscriptionDTO = { id, name, amountCents, billingDay, categoryId, category, startMonth: "YYYY-MM", endMonth: "YYYY-MM"|null, active, note }
+SubscriptionDTO = {
+  id, name, amountCents, billingDay, categoryId, category,
+  startMonth: "YYYY-MM", endMonth: "YYYY-MM"|null, active, note,
+  billingEffectiveMonth: "YYYY-MM"|null, currentAmountCents: number|null,
+  billingHistory, billingPauses
+}
 ```
 
 ## 7. 行为守则

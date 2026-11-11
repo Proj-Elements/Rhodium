@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
     restart: unless-stopped
     environment:
       POSTGRES_USER: yueyu
@@ -21,10 +21,17 @@ services:
       retries: 12
 
   app:
-    image: yueyu:latest
+    image: rhodium:0.1.0
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://yueyu:${POSTGRES_PASSWORD:-yueyu_password}@db:5432/yueyu?schema=public
+      PGHOST: db
+      PGPORT: 5432
+      PGDATABASE: yueyu
+      PGUSER: yueyu
+      PGPASSWORD: ${POSTGRES_PASSWORD:-yueyu_password}
+      RHODIUM_ALLOWED_HOSTS: ${RHODIUM_ALLOWED_HOSTS:-}
+      RHODIUM_ALLOWED_ORIGINS: ${RHODIUM_ALLOWED_ORIGINS:-}
+      RHODIUM_TRUST_PROXY: ${RHODIUM_TRUST_PROXY:-false}
       NEXT_PUBLIC_APP_NAME: Rhodium
       PORT: 3030
       HOSTNAME: 0.0.0.0

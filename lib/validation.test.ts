@@ -1,41 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  backupSchema,
   categoryPatchSchema,
   categorySchema,
-  importSchema,
   subscriptionSchema,
   subscriptionToggleSchema,
   transactionReimburseSchema,
   transactionRestoreSchema,
   transactionSchema,
+  transactionEditSchema,
   transactionUnreimburseSchema,
 } from "@/lib/validation";
-
-/** Shaped exactly like GET /api/export?format=json, extra columns included. */
-const exportedBackup = {
-  version: 1,
-  exportedAt: "2025-09-01T00:00:00.000Z",
-  categories: [
-    { id: "cat-1", name: "餐饮", type: "EXPENSE", isSystem: true, sortOrder: 0, archivedAt: null, createdAt: "2025-01-01T00:00:00.000Z", updatedAt: "2025-01-01T00:00:00.000Z" },
-  ],
-  subscriptions: [
-    { id: "sub-1", name: "音乐会员", amountCents: 1500, billingDay: 8, categoryId: "cat-1", startMonth: "2025-01", endMonth: null, active: true, note: null },
-  ],
-  budgets: [{ id: "bud-1", month: "2025-09-01", amountCents: 300000 }],
-  settlements: [
-    {
-      id: "set-1",
-      month: "2025-08-01",
-      budgetAmountCents: 300000,
-      expenseAmountCents: 120000,
-      incomeAmountCents: 0,
-      remainingAmountCents: 180000,
-      settledAt: "2025-09-01T00:00:00.000Z",
-      reopenedAt: null,
-    },
-  ],
-};
 
 const validTransaction = {
   type: "expense" as const,
@@ -52,58 +26,6 @@ const validSubscription = {
   startMonth: "2024-03",
 };
 
-describe("backupSchema", () => {
-  it("accepts a real export payload", () => {
-    const parsed = backupSchema.parse(exportedBackup);
-    expect(parsed.categories?.[0].name).toBe("餐饮");
-    expect(parsed.subscriptions?.[0].categoryId).toBe("cat-1");
-    expect(parsed.budgets?.[0].month).toBe("2025-09-01");
-    expect(parsed.settlements?.[0].remainingAmountCents).toBe(180000);
-  });
-
-  it("strips columns that must never reach the database", () => {
-    const parsed = backupSchema.parse(exportedBackup);
-    expect(parsed.categories?.[0]).not.toHaveProperty("createdAt");
-    expect(parsed.budgets?.[0]).not.toHaveProperty("id");
-    expect(parsed.settlements?.[0]).not.toHaveProperty("id");
-  });
-
-  it("rejects rows missing their correlation id or natural key", () => {
-    expect(() => backupSchema.parse({ categories: [{ name: "餐饮" }] })).toThrow();
-    expect(() => backupSchema.parse({ subscriptions: [{ id: "s1", name: "会员", amountCents: 100, billingDay: 1, startMonth: "2025-01" }] })).toThrow();
-    expect(() => backupSchema.parse({ budgets: [{ amountCents: 100 }] })).toThrow();
-  });
-
-  it("rejects impossible or malformed months", () => {
-    expect(() => backupSchema.parse({ budgets: [{ month: "2025-02-30", amountCents: 100 }] })).toThrow();
-    expect(() => backupSchema.parse({ settlements: [{ month: "2025-08", budgetAmountCents: 1, expenseAmountCents: 1, incomeAmountCents: 1 }] })).toThrow();
-  });
-
-  it("rejects oversized collections before accumulating every invalid element's issues", () => {
-    const result = backupSchema.safeParse({ categories: Array(501).fill(null) });
-    expect(result.success).toBe(false);
-    if (!result.success) expect(result.error.issues).toHaveLength(1);
-  });
-
-  it("caps payload size so one request cannot balloon the restore", () => {
-    const rows = Array.from({ length: 501 }, (_, index) => ({ id: `c${index}`, name: `分类${index}` }));
-    expect(() => backupSchema.parse({ categories: rows })).toThrow();
-  });
-
-  it("allows a bounded row batch from a backup containing more than 20,000 transactions", () => {
-    const transactions = Array.from({ length: 20_001 }, (_, index) => ({
-      id: `tx-${index}`,
-      type: "EXPENSE",
-      amountCents: 100,
-      occurredOn: "2024-03-10",
-      categoryId: "cat-1",
-    }));
-    const parsed = importSchema.parse({ format: "json", rows: transactions.slice(0, 1), backup: { transactions } });
-    expect(parsed.rows).toHaveLength(1);
-    expect(parsed.backup?.transactions).toHaveLength(20_001);
-  });
-});
-
 describe("transactionSchema", () => {
   it("accepts a minimal valid body", () => {
     expect(transactionSchema.parse(validTransaction)).toMatchObject({ type: "expense", amount: "12.34" });
@@ -113,7 +35,7 @@ describe("transactionSchema", () => {
     expect(transactionSchema.parse({ ...validTransaction, amount: 12.34 }).amount).toBe(12.34);
   });
 
-  it.each(["-1", "abc", "", "   "])("rejects amount %j", (amount) => {
+  it.each(["-1", "abc", "", "   ", "0x10", "1,2,3", "1e3"])("rejects amount %j", (amount) => {
     expect(transactionSchema.safeParse({ ...validTransaction, amount }).success).toBe(false);
   });
 
@@ -148,6 +70,19 @@ describe("transactionSchema", () => {
   it("caps the note length at 200 characters", () => {
     expect(transactionSchema.safeParse({ ...validTransaction, note: "字".repeat(200) }).success).toBe(true);
     expect(transactionSchema.safeParse({ ...validTransaction, note: "字".repeat(201) }).success).toBe(false);
+  });
+
+  it.each(["restore", "reimburse", "unreimburse"])("rejects an action %s mixed with a create or edit", (action) => {
+    expect(transactionSchema.safeParse({ ...validTransaction, [action]: true }).success).toBe(false);
+    expect(transactionEditSchema.safeParse({ ...validTransaction, expectedVersion: 1, [action]: true }).success).toBe(false);
+  });
+
+  it("requires an integer version for every full edit", () => {
+    expect(transactionEditSchema.safeParse({ ...validTransaction, expectedVersion: 1 }).success).toBe(true);
+    for (const expectedVersion of [undefined, 0, -1, 1.5, "1"]) {
+      expect(transactionEditSchema.safeParse({ ...validTransaction, expectedVersion }).success).toBe(false);
+    }
+    expect(transactionSchema.safeParse({ ...validTransaction, expectedVersion: 1 }).success).toBe(false);
   });
 });
 
@@ -195,22 +130,22 @@ describe("strict toggle and restore bodies", () => {
   });
 
   it("accepts only restore: true", () => {
-    expect(transactionRestoreSchema.safeParse({ restore: true }).success).toBe(true);
-    expect(transactionRestoreSchema.safeParse({ restore: false }).success).toBe(false);
-    expect(transactionRestoreSchema.safeParse({ restore: true, amount: "1" }).success).toBe(false);
+    expect(transactionRestoreSchema.safeParse({ restore: true, expectedVersion: 1 }).success).toBe(true);
+    expect(transactionRestoreSchema.safeParse({ restore: false, expectedVersion: 1 }).success).toBe(false);
+    expect(transactionRestoreSchema.safeParse({ restore: true, expectedVersion: 1, amount: "1" }).success).toBe(false);
   });
 
   it("accepts only reimburse: true and rejects extra keys", () => {
-    expect(transactionReimburseSchema.safeParse({ reimburse: true }).success).toBe(true);
-    expect(transactionReimburseSchema.safeParse({ reimburse: false }).success).toBe(false);
-    expect(transactionReimburseSchema.safeParse({ reimburse: true, amount: "1" }).success).toBe(false);
+    expect(transactionReimburseSchema.safeParse({ reimburse: true, expectedVersion: 1 }).success).toBe(true);
+    expect(transactionReimburseSchema.safeParse({ reimburse: false, expectedVersion: 1 }).success).toBe(false);
+    expect(transactionReimburseSchema.safeParse({ reimburse: true, expectedVersion: 1, amount: "1" }).success).toBe(false);
   });
 
   it("accepts only unreimburse: true and rejects mixed actions or edits", () => {
-    expect(transactionUnreimburseSchema.safeParse({ unreimburse: true }).success).toBe(true);
-    expect(transactionUnreimburseSchema.safeParse({ unreimburse: false }).success).toBe(false);
-    expect(transactionUnreimburseSchema.safeParse({ unreimburse: true, amount: "1" }).success).toBe(false);
-    expect(transactionUnreimburseSchema.safeParse({ unreimburse: true, reimburse: true }).success).toBe(false);
+    expect(transactionUnreimburseSchema.safeParse({ unreimburse: true, expectedVersion: 1 }).success).toBe(true);
+    expect(transactionUnreimburseSchema.safeParse({ unreimburse: false, expectedVersion: 1 }).success).toBe(false);
+    expect(transactionUnreimburseSchema.safeParse({ unreimburse: true, expectedVersion: 1, amount: "1" }).success).toBe(false);
+    expect(transactionUnreimburseSchema.safeParse({ unreimburse: true, expectedVersion: 1, reimburse: true }).success).toBe(false);
     expect(transactionUnreimburseSchema.safeParse(validTransaction).success).toBe(false);
   });
 
@@ -224,6 +159,15 @@ describe("strict toggle and restore bodies", () => {
 
   it("does not mistake a full subscription body for a toggle body", () => {
     expect(subscriptionToggleSchema.safeParse({ ...validSubscription, active: true }).success).toBe(false);
+  });
+
+  it.each([transactionRestoreSchema, transactionReimburseSchema, transactionUnreimburseSchema])("requires the observed version for action requests", (schema) => {
+    const actions = { restore: true, reimburse: true, unreimburse: true };
+    for (const [action, value] of Object.entries(actions)) {
+      expect(schema.safeParse({ [action]: value }).success).toBe(false);
+      expect(schema.safeParse({ [action]: value, expectedVersion: 0 }).success).toBe(false);
+      expect(schema.safeParse({ [action]: value, expectedVersion: 1.5 }).success).toBe(false);
+    }
   });
 });
 
@@ -242,41 +186,18 @@ describe("category schemas", () => {
     expect(categoryPatchSchema.safeParse({ sortOrder: 2 }).success).toBe(false);
   });
 
-  it("preserves a chosen icon on create, patch and backup restore", () => {
+  it("preserves a chosen icon on create and patch", () => {
     expect(categorySchema.parse({ name: "咖啡时间", icon: "coffee" })).toMatchObject({ icon: "coffee" });
     expect(categoryPatchSchema.parse({ icon: "coffee" })).toEqual({ icon: "coffee" });
-    expect(backupSchema.parse({ categories: [{ id: "c1", name: "咖啡时间", icon: "coffee" }] }).categories?.[0].icon).toBe("coffee");
   });
 
-  it("allows automatic icons and legacy backups without an icon", () => {
+  it("allows automatic icons", () => {
     expect(categorySchema.parse({ name: "自动分类", icon: null })).toHaveProperty("icon", null);
     expect(categoryPatchSchema.parse({ icon: null })).toEqual({ icon: null });
-    expect(backupSchema.parse(exportedBackup).categories?.[0]).not.toHaveProperty("icon");
   });
 
   it.each(["missing-icon", "https://example.com/icon.svg", "<svg />", "", 42])("rejects unsupported icon %j", (icon) => {
     expect(categorySchema.safeParse({ name: "分类", icon }).success).toBe(false);
     expect(categoryPatchSchema.safeParse({ icon }).success).toBe(false);
-    expect(backupSchema.safeParse({ categories: [{ id: "c1", name: "分类", icon }] }).success).toBe(false);
-  });
-});
-
-describe("importSchema", () => {
-  it("allows an empty row list (backup-only restore), caps the batch at 20000, and rejects unknown formats", () => {
-    const row = { date: "2024-03-01" };
-    expect(importSchema.safeParse({ format: "csv", rows: [] }).success).toBe(true);
-    expect(importSchema.safeParse({ format: "csv", rows: [row] }).success).toBe(true);
-    expect(importSchema.safeParse({ format: "csv", rows: Array(20_000).fill(row) }).success).toBe(true);
-    expect(importSchema.safeParse({ format: "csv", rows: Array(20_001).fill(row) }).success).toBe(false);
-    expect(importSchema.safeParse({ format: "xlsx", rows: [{}] }).success).toBe(false);
-  });
-
-  it("leaves free-form rows untouched and reports no nested backup by default", () => {
-    expect(importSchema.parse({ format: "csv", rows: [{ 日期: "2025-09-01" }] }).backup).toBeUndefined();
-  });
-
-  it("validates the nested backup envelope", () => {
-    expect(() => importSchema.parse({ format: "json", rows: [{}], backup: { categories: [{ name: "无 id" }] } })).toThrow();
-    expect(importSchema.parse({ format: "json", rows: [{}], backup: exportedBackup }).backup?.version).toBe(1);
   });
 });

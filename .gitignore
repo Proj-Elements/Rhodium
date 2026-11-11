@@ -2,8 +2,8 @@ node_modules
 .next
 .next-*/
 out
-.env
-.env.local
+.env*
+!.env.example
 coverage
 .vitest/
 *.log
@@ -22,4 +22,8 @@ Docker/*.tar.gz
 # Local agent tool configs
 .claude/
 .freebuff/
+.copilot/
+.delta/
+.thinkrail/
+.codex/
 vercel.json

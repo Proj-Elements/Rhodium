@@ -3,6 +3,7 @@ import { calculateRemaining, dateOnlyKey, daysInMonth, monthKey, monthStart, tod
 import { resolveBudget, resolveBudgets, type ResolvedBudget } from "@/lib/budget";
 import { prisma } from "@/lib/prisma";
 import { serializeSettlement } from "@/lib/serializers";
+import { withLedgerRead } from "@/lib/ledger-write";
 
 export async function isMonthLocked(month: string, db: Prisma.TransactionClient = prisma) {
   const settlement = await db.monthlySettlement.findUnique({ where: { month: monthStart(month) }, select: { reopenedAt: true } });
@@ -13,11 +14,14 @@ export async function isMonthLocked(month: string, db: Prisma.TransactionClient 
 export async function getLockedMonths(months: string[], db: Prisma.TransactionClient = prisma): Promise<string[]> {
   const unique = [...new Set(months)];
   if (!unique.length) return [];
-  const settlements = await db.monthlySettlement.findMany({
-    where: { month: { in: unique.map(monthStart) }, reopenedAt: null },
-    select: { month: true },
-  });
-  const locked = new Set(settlements.map((settlement) => monthKey(settlement.month)));
+  const locked = new Set<string>();
+  for (let offset = 0; offset < unique.length; offset += 5_000) {
+    const settlements = await db.monthlySettlement.findMany({
+      where: { month: { in: unique.slice(offset, offset + 5_000).map(monthStart) }, reopenedAt: null },
+      select: { month: true },
+    });
+    for (const settlement of settlements) locked.add(monthKey(settlement.month));
+  }
   return unique.filter((month) => locked.has(month));
 }
 
@@ -42,6 +46,36 @@ type SummaryTransaction = {
 };
 
 type SummarySettlement = Parameters<typeof serializeSettlement>[0];
+
+export type SettlementCategorySnapshot = {
+  categoryId: string;
+  categoryName: string;
+  expenseCents: number;
+  outOfPocketCents: number;
+  incomeCents: number;
+};
+
+/** Decode a captured category breakdown; legacy settlements have no snapshot. */
+export function settlementCategorySnapshot(value: unknown): SettlementCategorySnapshot[] | null {
+  if (!Array.isArray(value)) return null;
+  const entries: SettlementCategorySnapshot[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null ||
+        !("categoryId" in entry) || typeof entry.categoryId !== "string" ||
+        !("categoryName" in entry) || typeof entry.categoryName !== "string" ||
+        !("expenseCents" in entry) || typeof entry.expenseCents !== "number" || !Number.isSafeInteger(entry.expenseCents) || entry.expenseCents < 0 ||
+        !("outOfPocketCents" in entry) || typeof entry.outOfPocketCents !== "number" || !Number.isSafeInteger(entry.outOfPocketCents) || entry.outOfPocketCents < 0 ||
+        !("incomeCents" in entry) || typeof entry.incomeCents !== "number" || !Number.isSafeInteger(entry.incomeCents) || entry.incomeCents < 0) return null;
+    entries.push({
+      categoryId: entry.categoryId,
+      categoryName: entry.categoryName,
+      expenseCents: entry.expenseCents,
+      outOfPocketCents: entry.outOfPocketCents,
+      incomeCents: entry.incomeCents,
+    });
+  }
+  return entries;
+}
 
 /**
  * Pure fold over one month's rows. Kept separate from fetching so a single
@@ -96,12 +130,19 @@ function summarizeMonth(
     dailyByDate.set(date, daily);
   }
 
-  const topCategory = [...byCategory.values()].sort((a, b) => b.amountCents - a.amountCents)[0] ?? null;
   const topDate = [...byDate.entries()].sort((a, b) => b[1] - a[1])[0] ?? null;
   const today = todayInShanghai();
   const currentMonth = today.slice(0, 7);
   const elapsedDays = month === currentMonth ? Number(today.slice(8, 10)) : daysInMonth(month);
   const settled = settlement !== null && settlement.reopenedAt === null;
+  const capturedCategories = settled && "categorySnapshot" in settlement
+    ? settlementCategorySnapshot(settlement.categorySnapshot)
+    : null;
+  const categoryBreakdown = capturedCategories
+    ? capturedCategories.filter((entry) => entry.expenseCents > 0).map((entry) => ({ categoryId: entry.categoryId, categoryName: entry.categoryName, amountCents: entry.expenseCents }))
+    : [...byCategory.entries()].map(([categoryId, entry]) => ({ categoryId, categoryName: entry.name, amountCents: entry.amountCents }));
+  categoryBreakdown.sort((first, second) => second.amountCents - first.amountCents);
+  const topCategory = categoryBreakdown.length ? { name: categoryBreakdown[0].categoryName, amountCents: categoryBreakdown[0].amountCents } : null;
   const budgetCents = settled
     ? settlement.remainingAmountCents === null
       ? null
@@ -125,7 +166,7 @@ function summarizeMonth(
   return {
     month,
     budgetCents,
-    budgetSource: budget.source,
+    budgetSource: settled ? "settlement" as const : budget.source,
     expenseCents: reportedExpenseCents,
     outOfPocketCents: reportedOutOfPocketCents,
     reimbursedCents,
@@ -133,8 +174,10 @@ function summarizeMonth(
     incomeCents: reportedIncomeCents,
     remainingCents,
     dailyAverageCents: reportedOutOfPocketCents ? Math.round(reportedOutOfPocketCents / Math.max(1, elapsedDays)) : 0,
+    grossDailyAverageCents: reportedExpenseCents ? Math.round(reportedExpenseCents / Math.max(1, elapsedDays)) : 0,
     dailyBreakdown,
     topCategory,
+    categoryBreakdown,
     topDate: topDate ? { date: topDate[0], amountCents: topDate[1] } : null,
     subscriptionExpenseCents,
     transactionCount: transactions.length,
@@ -149,7 +192,8 @@ export type MonthSummary = ReturnType<typeof summarizeMonth>;
  * One transactions fetch feeds expense totals, category breakdown, top-date and
  * the daily calendar (previously the month was fetched twice).
  */
-export async function getMonthSummary(month: string, db: Prisma.TransactionClient = prisma): Promise<MonthSummary> {
+export async function getMonthSummary(month: string, db?: Prisma.TransactionClient): Promise<MonthSummary> {
+  if (!db) return withLedgerRead((tx) => getMonthSummary(month, tx));
   const start = monthStart(month);
   const nextStart = new Date(start);
   nextStart.setUTCMonth(nextStart.getUTCMonth() + 1);
@@ -169,12 +213,13 @@ export async function getMonthSummary(month: string, db: Prisma.TransactionClien
 }
 
 /**
- * Summaries for several months in three queries instead of four per month.
+ * Fetch budgets, transactions and snapshots in a bounded set of batch queries.
  * Transactions are read as one span between the earliest and latest month, so
  * callers should pass a contiguous run (the settlements page passes six).
  */
-export async function getMonthSummaries(months: string[], db: Prisma.TransactionClient = prisma): Promise<MonthSummary[]> {
+export async function getMonthSummaries(months: string[], db?: Prisma.TransactionClient): Promise<MonthSummary[]> {
   if (!months.length) return [];
+  if (!db) return withLedgerRead((tx) => getMonthSummaries(months, tx));
   const starts = months.map(monthStart);
   const times = starts.map((date) => date.getTime());
   const rangeStart = new Date(Math.min(...times));

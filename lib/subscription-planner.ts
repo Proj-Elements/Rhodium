@@ -1,4 +1,6 @@
 import { billingDate, monthKey, parseDateOnly } from "@/lib/domain";
+import { initialBillingHistory, parseBillingHistory } from "@/lib/billing-history";
+import type { BillingPause } from "@/lib/billing-pauses";
 
 export type SubscriptionPlanInput = {
   id: string;
@@ -9,6 +11,8 @@ export type SubscriptionPlanInput = {
   name: string;
   startMonth: Date;
   endMonth: Date | null;
+  billingHistory?: unknown;
+  billingPauses?: BillingPause[];
 };
 
 export type BillingCandidate = {
@@ -25,33 +29,51 @@ export type BillingCandidate = {
  * `referenceDate`? Used by the batched sync; unit-tested for billing-day
  * clamping, start/end windows, and already-passed filtering.
  */
-export function planBillingCandidates(subscriptions: SubscriptionPlanInput[], referenceDate: string): BillingCandidate[] {
+export function* iterateBillingCandidates(subscriptions: SubscriptionPlanInput[], referenceDate: string): Generator<BillingCandidate> {
   const currentDate = parseDateOnly(referenceDate);
   const currentMonth = referenceDate.slice(0, 7);
-  const candidates: BillingCandidate[] = [];
 
   for (const subscription of subscriptions) {
-    const firstMonth = monthKey(subscription.startMonth);
-    const lastMonth = subscription.endMonth ? monthKey(subscription.endMonth) : currentMonth;
-    if (firstMonth > currentMonth || firstMonth > lastMonth) continue;
-
-    let cursor = firstMonth;
-    while (cursor <= currentMonth && cursor <= lastMonth) {
-      const dueDate = billingDate(cursor, subscription.billingDay);
-      if (dueDate <= currentDate) {
-        candidates.push({
-          subscriptionId: subscription.id,
-          month: cursor,
-          dueDate,
-          amountCents: subscription.amountCents,
-          categoryId: subscription.categoryId,
-          note: subscription.note?.trim() || `${subscription.name} · 自动记账`,
-        });
+    const history = subscription.billingHistory === undefined ? initialBillingHistory({
+      ...subscription,
+      startMonth: monthKey(subscription.startMonth),
+      endMonth: subscription.endMonth ? monthKey(subscription.endMonth) : null,
+    }) : parseBillingHistory(subscription.billingHistory);
+    for (let index = 0; index < history.length; index += 1) {
+      const plan = history[index];
+      let cursor = plan.effectiveMonth > plan.startMonth ? plan.effectiveMonth : plan.startMonth;
+      const nextEffectiveMonth = history[index + 1]?.effectiveMonth;
+      let lastMonth = plan.endMonth && plan.endMonth < currentMonth ? plan.endMonth : currentMonth;
+      if (nextEffectiveMonth && nextEffectiveMonth <= lastMonth) lastMonth = addMonths(nextEffectiveMonth, -1);
+      while (cursor <= lastMonth) {
+        const dueDate = billingDate(cursor, plan.billingDay);
+        const date = dueDate.toISOString().slice(0, 10);
+        const pause = subscription.billingPauses?.find((item) => date >= item.start && (item.end === null || date < item.end));
+        if (pause) {
+          if (pause.end === null) break;
+          const resumeMonth = pause.end.slice(0, 7);
+          cursor = resumeMonth > cursor ? resumeMonth : addMonths(cursor, 1);
+          continue;
+        }
+        if (dueDate <= currentDate) {
+          yield {
+            subscriptionId: subscription.id,
+            month: cursor,
+            dueDate,
+            amountCents: plan.amountCents,
+            categoryId: plan.categoryId,
+            note: plan.note?.trim() || `${plan.name} · 自动记账`,
+          };
+        }
+        if (cursor === lastMonth) break;
+        cursor = addMonths(cursor, 1);
       }
-      cursor = addMonths(cursor, 1);
     }
   }
-  return candidates;
+}
+
+export function planBillingCandidates(subscriptions: SubscriptionPlanInput[], referenceDate: string): BillingCandidate[] {
+  return Array.from(iterateBillingCandidates(subscriptions, referenceDate));
 }
 
 function addMonths(month: string, offset: number): string {

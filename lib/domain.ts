@@ -84,12 +84,17 @@ export function billingDate(month: string, billingDay: number): Date {
 
 export function moneyToCents(value: string | number): number {
   if (typeof value === "string" && !value.trim()) throw badRequest("金额不能为空");
-  const numeric = typeof value === "number" ? value : Number(value.replace(/,/g, "").trim());
-  if (!Number.isFinite(numeric) || numeric < 0) throw badRequest("金额必须是非负数字");
-  // `numeric * 100` carries a binary artifact (1.005 * 100 === 100.49999999999999),
-  // so the product is snapped back to its decimal value before rounding. Without
-  // this, a half-cent input rounds down and silently loses a cent.
-  const cents = Math.round(Number((numeric * 100).toFixed(4)));
+  if (typeof value === "number") {
+    if (!Number.isFinite(value) || value < 0) throw badRequest("金额必须是非负数字");
+    if (value >= 20_000_001) throw badRequest("金额超出可记录范围");
+    if (value < 0.000001) return 0;
+  }
+  const decimal = String(value).trim();
+  if (!/^(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(decimal)) throw badRequest("金额必须是非负数字");
+  const [whole, fraction = ""] = decimal.replace(/,/g, "").split(".");
+  const integer = whole.replace(/^0+/, "") || "0";
+  if (integer.length > 8) throw badRequest("金额超出可记录范围");
+  const cents = Number(integer) * 100 + Number(fraction.slice(0, 2).padEnd(2, "0")) + (fraction.charAt(2) >= "5" ? 1 : 0);
   if (cents > 2_000_000_000) throw badRequest("金额超出可记录范围");
   return cents;
 }
@@ -104,7 +109,8 @@ export function calculateRemaining(budgetCents: number | null, expenseCents: num
 }
 
 export function calculateUsage(budgetCents: number | null, expenseCents: number): number | null {
-  if (!budgetCents || budgetCents <= 0) return null;
+  if (budgetCents === null) return null;
+  if (budgetCents === 0) return expenseCents > 0 ? 100 : 0;
   return Math.round((expenseCents / budgetCents) * 100);
 }
 

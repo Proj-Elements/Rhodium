@@ -37,4 +37,16 @@ describe("import preview feedback", () => {
     expect(markup).not.toContain("确认导入");
     expect(render({ status: "idle" })).toBe("");
   });
+
+  it("does not offer a green confirmation for a conflicting target ledger", () => {
+    const counts = { create: 0, update: 0 };
+    const markup = render({ ...ready, selection: { ...ready.selection, preview: { total: 0, valid: 0, errors: [], summary: {
+      transactions: { ...counts, unchanged: 0 }, categories: counts, subscriptions: counts, budgets: counts, settlements: counts,
+      lockedMonths: ["2026-10"], conflicts: ["结算与目标账目不一致"],
+    } } } });
+    expect(markup).toContain("结算与目标账目不一致");
+    expect(markup).toContain("2026-10");
+    expect(markup).not.toContain("文件检查通过");
+    expect(markup).not.toContain("确认导入");
+  });
 });

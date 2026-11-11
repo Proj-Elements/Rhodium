@@ -8,6 +8,7 @@ type ModalDialogProps = {
   labelledBy: string;
   /** false while a request is in flight, so Escape/backdrop cannot discard input. */
   dismissable?: boolean;
+  busy?: boolean;
   wide?: boolean;
   onClose: () => void;
   onSubmit: (event: FormEvent) => void;
@@ -18,11 +19,12 @@ type ModalDialogProps = {
 
 /**
  * HeroUI owns focus trapping, background inertness, scroll locking and restoration.
- * Pending mutations cannot be dismissed by Escape or by clicking the backdrop.
+ * Callers decide whether dismissal cancels waiting for an outstanding mutation.
  */
 export function ModalDialog({
   labelledBy,
   dismissable = true,
+  busy = false,
   wide,
   onClose,
   onSubmit,
@@ -42,7 +44,7 @@ export function ModalDialog({
     >
       <Modal.Container placement="center" size={wide ? "lg" : "md"} scroll="inside" className="ledger-modal-container">
         <Modal.Dialog aria-labelledby={labelledBy} className="ledger-modal-dialog text-overlay-foreground">
-          <form className="modal-form" onSubmit={onSubmit} aria-busy={!dismissable}>
+          <form className="modal-form" onSubmit={onSubmit} aria-busy={busy || !dismissable}>
             {header && <Modal.Header className="ledger-modal-header">{header}</Modal.Header>}
             <Modal.Body className="form-stack ledger-modal-body">{children}</Modal.Body>
             {footer && <Modal.Footer className="ledger-modal-footer">{footer}</Modal.Footer>}
