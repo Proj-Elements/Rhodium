@@ -1,6 +1,6 @@
 # Rhodium 全面审查与修复
 
-基线为 `main@b794337`。本轮按账务核心、订阅、备份、客户端、工程、额外分支六个范围审查。各实现代理先完成修复及回归用例，统一整合后才执行测试。历史草稿中的测试和安全结论不作为本轮验证结果。
+基线为 `main@b794337`。本轮按账务核心、订阅、备份、客户端、工程、额外分支六个范围审查，修复下列 41 项缺陷。各实现代理先完成修复及回归用例，统一整合后才执行测试。收尾由主代理完成，未再启动子代理。历史草稿中的测试和安全结论不作为本轮验证结果。
 
 ## 主要缺陷与处理
 
@@ -50,23 +50,37 @@
 
 ## 额外分支与草稿
 
-Thinkrail 的两个文档提交保留原作者并纳入整合，模块说明按最终实现更新。旧 Claude UI 草稿会回退报销展示；旧 quality-hardening CI 草稿调用不存在的脚本并降低构建固定程度，因此不能直接覆盖当前代码。原未提交草稿必须保留可恢复副本。两个 freebuff 工作树没有独占提交或源代码改动。
+Thinkrail 的两个文档提交 `02d7478`、`84aa382` 保留原作者并纳入整合，模块说明按最终实现更新。旧 Claude UI 草稿会回退报销展示；旧 quality-hardening CI 草稿调用不存在的脚本并降低构建固定程度，因此未用于覆盖当前代码。所有旧工作树的未提交修改已保留在仓库之外的私有恢复目录，二进制补丁和 28 个未跟踪文件均逐字节比对一致，Git bundle 完整性检查通过。两个 freebuff 工作树没有独占提交或源代码改动。
 
 ## 验证记录
 
-全部实现和契约整合后，统一执行了以下本地门禁：
+全部实现和契约整合后，在代码候选 `56c95ac` 上统一执行了以下本地门禁；之后的 main 合并未改变该候选的文件内容：
 
 - `npm run typecheck`：通过。
 - `npx tsc --noEmit -p tsconfig.server.json`：通过。
 - `npm run lint`：通过，无警告。
-- `node --test scripts/*.test.mjs`：24/24 通过。
+- `node --test scripts/*.test.mjs`：25/25 通过。
 - `npm test`：31 个文件、397/397 通过。
 - 在带清空标记的一次性 PostgreSQL 上执行 `npm run test:db`：10 个文件、139/139 通过。
 - `NEXT_TELEMETRY_DISABLED=1 npm run build`：通过；授权 HeroUI Pro 版本保持为 `1.0.0-beta.11`，`package.json` 和 `package-lock.json` 未变化。
 
 桌面与移动端、亮暗主题、零预算、报销口径、双标签页冲突、账目历史、跨月搜索、切月失败重试和导入预览等浏览器验收均已在本地完成。生产镜像使用 BuildKit secret 构建成功；容器以 UID 1000 运行，迁移成功，`GET /api/health` 返回数据库正常，运行环境与 `/run/secrets` 均不含授权密钥，使用含 `#/%@$` 的 `PGPASSWORD` 可正常连接，SIGTERM 后退出码为 0。
 
-远程 CI、分支清理和 Entire/GitHub 双远端同步结果在推送后单独核对；未观测到指定提交的实际运行结果时，不记为通过。
+手机视口额外复核了切月断网：页面显示“无法连接账本，请检查连接后重试。”，隐藏旧金额并禁用记账；解除请求阻断后点击“重新加载”正常恢复。临时网络阻断和视口覆盖均已撤销。截图保留在本地验收目录，没有将合成测试数据或授权密钥提交到仓库。
+
+## 远程验证与合并
+
+| 候选与事件 | 实际结果 |
+| --- | --- |
+| `56c95ac` 分支 push | [CI 43041286177](https://github.com/Proj-Elements/Rhodium/actions/runs/43041286177) 通过，包含许可组件初始化与安全打包 |
+| [PR #1](https://github.com/Proj-Elements/Rhodium/pull/1) | [CI 43046731736](https://github.com/Proj-Elements/Rhodium/actions/runs/43046731736) 通过，验证当前候选并从可信 push 恢复授权组件 |
+| `fd4bfba` main push | [CI 43047605988](https://github.com/Proj-Elements/Rhodium/actions/runs/43047605988) 通过，包含生产容器构建、数据库健康检查、非 root、无运行时授权密钥及正常退出检查 |
+
+PR 已合并，使用本地 `Codex <Codex@koina.top>` 身份创建合并提交，保留所有原作者历史。GitHub 自动审查因 Copilot 额度不足未生成代码审查；该信息不作为审查通过。主代理已检查最终差异、相关账务契约及未解决讨论，PR 无未解决审查线程。
+
+本地镜像 `rhodium:0.1.0` 指向已启动验收的 `sha256:e275ee24a535d9718ef0becba0986735ab8f451e90f4721dbeaf7264e9791a85`，没有重新构建另一份未验收镜像冒充结果。
+
+确认提交均属于 main 历史后，已删除本地 `codex/ledger-review-fixes`、`codex/rhodium-review`，以及 GitHub、Entire 上的 `codex/rhodium-review`。三个分支清单独立核对均只剩 `main`，两个远端使用同一合并历史。旧工作树保持 detached，未提交草稿与私有恢复副本继续保留。最终文档补充仅执行文档差异检查，不重复运行应用全局测试。
 
 ## 明确边界
 

@@ -1,5 +1,7 @@
 # Branch integration audit: 2026-11-05
 
+This is a historical audit. Its branch exclusions, dependency findings and hook limitations describe that session. Current Rhodium repairs, verification and main-only branch cleanup are recorded in [the 2026-11-11 review](review-fixes-2026-11-11.md).
+
 ## Scope and baseline
 
 The user authorized committing and integrating all completed local branches into
@@ -186,18 +188,23 @@ repository Actions Secret. No key is stored in tracked files or Docker arguments
   cleanup. No real database migration, service replacement, release or public
   deployment occurred.
 
-- TODO(traceability): Entire is enabled, but Codex hook trust approval is missing
+- Historical traceability limitation: Entire was enabled, but Codex hook trust approval was missing
   and this session has no Entire session state. Outgoing checkpoint inventory is
   empty at the audited pushes. Code synchronization cannot create the missing
   capture retroactively; the user must review hook trust for future sessions.
   Do not fabricate trailers, amend commits, enable hooks or upload this
   secret-bearing session manually.
 
-## Dependency Risk Boundary
+## Dependency Risk Boundary (2026-11-05 snapshot)
 
-The refreshed lockfile audit reports 12 advisories: 4 high and 8 moderate, no
-critical. Existing tracked security TODOs cover Zod 3 (a major-version migration
+The lockfile audit at that point reported 12 advisories: 4 high and 8 moderate, no
+critical. The recorded security follow-ups covered Zod 3 (a major-version migration
 is needed), HeroUI install-tool figlet, ESLint/minimatch and Vitest/mocker. This
 branch-integration task does not bundle those independent dependency migrations.
 The app stays loopback-only; local checks and source synchronization do not
 authorize a release or public deployment, nor establish these issues as fixed.
+
+The later Zod migration and install-tool dependency repairs are documented in
+[the quality repair record](quality-hardening.md). Use that record and the
+[2026-11-11 review](review-fixes-2026-11-11.md) for subsequent results; the counts
+in this historical section are not a current dependency audit.

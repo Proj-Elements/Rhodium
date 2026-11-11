@@ -1,5 +1,7 @@
 # 代码质量修复验证记录
 
+本文件保留早期修复的历史验证。当前 Rhodium 的账务、恢复、请求安全、容器与 main 分支清理结果见 [2026-11-11 全面审查记录](review-fixes-2026-11-11.md)，不以本文件中的旧测试数量代替当前结果。
+
 初始基线：`9dec444`；前期工作树：`dsh/quality-hardening`。后续在 `codex/quality-hardening-finish` 整合 `main@2211fa4`，保留报销与撤销报销契约。原 dsh 工作树及其未提交 CI 草稿不变。测试只使用本任务创建、带 `rhodium:test-database` 标记的 PostgreSQL 临时库。没有迁移、清空或写入真实账本，没有执行生产部署。
 
 ## 已定位与修复
