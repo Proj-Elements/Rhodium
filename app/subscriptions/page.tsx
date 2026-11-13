@@ -5,7 +5,7 @@ import { Alert, Button, Card, Chip, Skeleton, Switch } from "@heroui/react";
 import { EmptyState, Segment } from "@heroui-pro/react";
 import { MetricCard } from "@/components/metric-card";
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { applySubscriptionRemoval, nextSubscriptionDate, subscriptionState } from "@/lib/subscription-view";
+import { applySubscriptionRemoval, nextSubscriptionDate, subscriptionState, subscriptionCountsForMonth } from "@/lib/subscription-view";
 import { AppShell } from "@/components/app-shell";
 import { CategoryIcon, Icon } from "@/components/icon";
 import { SubscriptionForm } from "@/components/subscription-form";
@@ -13,9 +13,7 @@ import { Toast, useFlash } from "@/components/toast";
 import { apiFetch, errorMessage } from "@/lib/api-client";
 import { isClientDataReady, runClientLoad } from "@/lib/client-load";
 import { getCategoryColor, getCategoryColors } from "@/lib/category-colors";
-import { billingDate, dateOnlyKey, formatMoney, todayInShanghai } from "@/lib/domain";
-import { effectiveBillingPlan } from "@/lib/billing-history";
-import { isBillingPaused } from "@/lib/billing-pauses";
+import { formatMoney, todayInShanghai } from "@/lib/domain";
 import { CategoryDTO, SubscriptionDTO } from "@/lib/types";
 import { useToday } from "@/lib/use-today";
 import { useLedgerRevision } from "@/lib/ledger-events";
@@ -73,7 +71,7 @@ export default function SubscriptionsPage() {
     try {
       const result = await apiFetch<{ subscription: SubscriptionDTO }>(`/api/subscriptions/${subscription.id}`, {
         method: "PATCH",
-        json: { active: !subscription.active },
+        json: { active: !subscription.active, expectedVersion: subscription.version },
       });
       setSubscriptions((items) =>
         items.map((item) => (item.id === subscription.id ? result.subscription : item)),
@@ -91,7 +89,7 @@ export default function SubscriptionsPage() {
     if (!ready || busyId) return;
     setBusyId(subscription.id);
     try {
-      const result = await apiFetch<{ deleted?: boolean; subscription?: SubscriptionDTO }>(`/api/subscriptions/${subscription.id}`, { method: "DELETE" });
+      const result = await apiFetch<{ deleted?: boolean; subscription?: SubscriptionDTO }>(`/api/subscriptions/${subscription.id}?expectedVersion=${subscription.version}`, { method: "DELETE" });
       setSubscriptions((items) => applySubscriptionRemoval(items, subscription.id, result));
       setPendingDelete(null);
       flash(result.deleted ? "固定支出已删除" : "固定支出已停用，历史账目仍会保留");
@@ -103,14 +101,7 @@ export default function SubscriptionsPage() {
   }
 
   const activeCount = subscriptions.filter((item) => item.active).length;
-  const currentSubscriptions = today ? subscriptions.filter((item) => {
-    if (subscriptionState(item, today) !== "current") return false;
-    const plan = effectiveBillingPlan(item.billingHistory, today.slice(0, 7));
-    if (!plan) return true;
-    const dueDate = dateOnlyKey(billingDate(today.slice(0, 7), plan.billingDay));
-    const category = item.currentCategory ?? item.category;
-    return !isBillingPaused([...item.billingPauses, ...(category.billingPauses ?? [])], dueDate);
-  }) : [];
+  const currentSubscriptions = today ? subscriptions.filter((item) => subscriptionCountsForMonth(item, today)) : [];
   const unknownCurrentPlans = currentSubscriptions.filter((item) => item.currentAmountCents === null).length;
   const activeTotal = currentSubscriptions.reduce((sum, item) => sum + (item.currentAmountCents ?? 0), 0);
   const nextDue = today ? subscriptions.map((item) => nextSubscriptionDate(item, today)).filter((date): date is string => Boolean(date)).sort()[0] : null;
@@ -133,7 +124,7 @@ export default function SubscriptionsPage() {
         <section className="grid gap-4 sm:grid-cols-3 reveal" aria-label="固定支出概况">
           <MetricCard label="本月计划固定支出" value={!ready ? "—" : unknownCurrentPlans ? "待核对" : formatMoney(activeTotal)} detail={unknownCurrentPlans ? `${unknownCurrentPlans} 项缺少本月可确认的历史计划，请核对后手动记账` : "按本月有效计划计入，暂停期间的记录日除外"} icon="wallet" />
           <MetricCard label="本月生效项目" value={<>{!ready ? "—" : currentSubscriptions.length}<span className="ml-1.5 text-xs font-normal tracking-normal text-muted">项</span></>} detail={ready ? `共 ${subscriptions.length} 项记录 · ${activeCount} 项已启用` : "等待账本读取完成"} icon="repeat" />
-          <MetricCard label="下次自动记录" value={!ready ? "—" : nextDue ? `${Number(nextDue.slice(5, 7))} 月 ${Number(nextDue.slice(8))} 日` : "暂无安排"} detail="到达记录日后，打开账本即会同步" icon="calendar" />
+          <MetricCard label="下次自动记录" value={!ready ? "—" : nextDue ? `${Number(nextDue.slice(5, 7))} 月 ${Number(nextDue.slice(8))} 日` : "暂无安排"} detail="服务端定时同步，打开页面也会刷新" icon="calendar" />
         </section>
 
         <div className="flex flex-wrap items-center justify-between gap-3">

@@ -1,9 +1,10 @@
 import { z } from "zod";
 import { categoryIconNames } from "@/lib/category-icons";
-import { parseDateOnly } from "@/lib/domain";
+import { parseDateOnly, parseMonth, todayInShanghai } from "@/lib/domain";
 import { parseBillingPauses } from "@/lib/billing-pauses";
 import { parseBillingHistory } from "@/lib/billing-history";
 import { optionalDateTime, parseCents, parseSignedCents } from "@/lib/import-parser";
+import { defaultCategories } from "@/lib/default-categories";
 
 export const MAX_BACKUP_ROWS = 100_000;
 export const MAX_APPEND_ROWS = 20_000;
@@ -24,7 +25,9 @@ const date = z.string().refine((value) => {
   try { parseDateOnly(value); return true; } catch { return false; }
 }, "日期无效");
 const monthDate = date.refine((value) => value.endsWith("-01"), "月份必须是月初日期");
-const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])(?:-01)?$/, "月份必须是 YYYY-MM 或月初日期");
+const month = z.string().regex(/^\d{4}-(0[1-9]|1[0-2])(?:-01)?$/, "月份必须是 YYYY-MM 或月初日期").refine((value) => {
+  try { parseMonth(value.slice(0, 7)); return true; } catch { return false; }
+}, "月份超出有效范围");
 const timestamp = z.string().refine((value) => {
   try { return optionalDateTime(value, "时间") !== null; } catch { return false; }
 }, "时间必须是带时区的 ISO 时间");
@@ -53,7 +56,8 @@ const category = z.object({
   icon: z.enum(categoryIconNames).nullable().optional(), isSystem: legacyBoolean.optional(),
   sortOrder: z.coerce.number().int().min(-2_147_483_648).max(2_147_483_647).optional(),
   archivedAt: timestamp.nullable().optional(), billingPauses: pauses, ...stamps,
-});
+  systemKey: z.string().nullable().optional(),
+}).refine((value) => value.systemKey === undefined || value.systemKey === null || defaultCategories.some((category) => category.systemKey === value.systemKey && category.type === (value.type ?? "EXPENSE").toUpperCase()), "系统分类身份无效或与收支方向不一致");
 const subscription = z.object({
   id, name: z.string().trim().min(1).max(80), amountCents: cents,
   billingDay: z.coerce.number().int().min(1).max(31), categoryId: id,
@@ -68,7 +72,7 @@ const settlement = z.object({
   month: monthDate, budgetAmountCents: totalCents, expenseAmountCents: totalCents, incomeAmountCents: totalCents,
   remainingAmountCents: signedCents.nullable().optional(), settledAt: timestamp.nullable().optional(), reopenedAt: timestamp.nullable().optional(),
   revision: revision.optional(), categorySnapshot: categorySnapshot.nullable().optional(), ...stamps,
-});
+}).refine((value) => Boolean(value.reopenedAt) || value.month.slice(0, 7) <= todayInShanghai().slice(0, 7), "未来月份还不能结算");
 const transaction = z.object({
   id, type: z.enum(["EXPENSE", "INCOME", "expense", "income"]).optional(), amountCents: cents,
   occurredOn: date, categoryId: id, note: z.string().nullable().optional(),
@@ -77,6 +81,8 @@ const transaction = z.object({
   deletedAt: timestamp.nullable().optional(), reimbursedAt: timestamp.nullable().optional(),
   version: revision.optional(), ...stamps,
 }).refine((value) => value.source !== "SUBSCRIPTION" || Boolean(value.subscriptionId), "订阅账目必须关联订阅")
+  .refine((value) => value.source !== "SUBSCRIPTION" || value.type === undefined || value.type.toUpperCase() === "EXPENSE", "订阅发生记录必须是支出")
+  .refine((value) => value.source === "SUBSCRIPTION" || (!value.subscriptionId && !value.subscriptionMonth && !value.subscriptionOccurrenceKey), "手动账目不能包含订阅关联")
   .refine((value) => !value.subscriptionOccurrenceKey || (value.source === "SUBSCRIPTION" && value.subscriptionId && value.subscriptionMonth && value.subscriptionOccurrenceKey === `${value.subscriptionId}:${value.subscriptionMonth.slice(0, 7)}`), "订阅发生键与账目关联不匹配")
   .refine((value) => !value.reimbursedAt || value.type === "EXPENSE" || value.type === "expense" || value.type === undefined, "收入账目不能标记报销");
 const transactionHistory = z.object({
@@ -99,6 +105,8 @@ export const backupSchema = z.object({
   settlementHistory: rows(settlementHistory, (value) => `${value.month}:${value.revision}`).refine((value) => new Set(value.map((row) => row.id)).size === value.length, "备份包含重复历史 ID").optional(),
   creationRequests: rows(creationRequest, (value) => value.key).optional(),
 }).superRefine((value, context) => {
+  const systemKeys = (value.categories ?? []).flatMap((row) => row.systemKey ? [row.systemKey] : []);
+  if (new Set(systemKeys).size !== systemKeys.length) context.addIssue({ code: "custom", message: "备份包含重复系统分类身份" });
   for (const items of [value.categories, value.subscriptions, value.budgets, value.settlements, value.transactions]) {
     for (const row of items ?? []) if (row.createdAt && row.updatedAt && new Date(row.updatedAt) < new Date(row.createdAt)) context.addIssue({ code: "custom", message: "更新时间不能早于创建时间" });
   }

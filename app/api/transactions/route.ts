@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { type Prisma, TransactionType } from "@prisma/client";
 import { handleApiError, parseJsonBody, monthRange } from "@/lib/api";
@@ -11,6 +10,7 @@ import { transactionSchema } from "@/lib/validation";
 import { getLockedMonths, isMonthLocked } from "@/lib/summary";
 import { assertTransactionCategory, transactionData } from "@/lib/transactions";
 import { recordTransactionHistory } from "@/lib/transaction-history";
+import { creationIdentity, replayCreation } from "@/lib/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -91,25 +91,18 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = transactionSchema.parse(await parseJsonBody(request));
-    const key = request.headers.get("idempotency-key");
-    if (key !== null && !/^[A-Za-z0-9._:-]{8,128}$/.test(key)) throw badRequest("Idempotency-Key 应为 8 到 128 位字母、数字或 ._:-");
     const data = transactionData(body);
-    const requestHash = createHash("sha256").update(JSON.stringify(data)).digest("hex");
+    const identity = creationIdentity(request, "transaction", data);
     const result = await withLedgerWrite(async (tx) => {
-      if (key) {
-        const previous = await tx.creationRequest.findUnique({ where: { key } });
-        if (previous) {
-          if (previous.requestHash !== requestHash) throw conflict("此 Idempotency-Key 已用于另一笔账目，请重新生成后再提交");
-          return { response: previous.response, replayed: true };
-        }
-      }
+      const replay = await replayCreation(tx, identity, request.headers.get("idempotency-key"));
+      if (replay) return { response: replay, replayed: true };
       if (await isMonthLocked(body.occurredOn.slice(0, 7), tx)) throw conflict("本月已经结算，请先重新打开本月");
       await ensureDefaultCategories(tx);
       await assertTransactionCategory(body.categoryId, body.type, tx);
       const transaction = await tx.transaction.create({ data, include: transactionInclude });
       await recordTransactionHistory(tx, transaction, "create");
       const response = { transaction: serializeTransaction(transaction) };
-      if (key) await tx.creationRequest.create({ data: { key, requestHash, response: response as unknown as Prisma.InputJsonObject } });
+      if (identity.key) await tx.creationRequest.create({ data: { ...identity, key: identity.key, response: response as unknown as Prisma.InputJsonObject } });
       return { response, replayed: false };
     });
     return NextResponse.json(result.response, { status: 201, headers: { "Idempotent-Replay": String(result.replayed) } });

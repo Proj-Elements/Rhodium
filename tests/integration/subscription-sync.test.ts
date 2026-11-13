@@ -131,9 +131,10 @@ describe("route writes invalidate the sync cache", () => {
     });
     expect((await syncSubscriptions()).created).toBe(0);
 
-    const response = await reopenMonth(new Request("http://localhost/api/settlements/reopen", { method: "POST" }), routeContext({ month }));
+    const response = await reopenMonth(new Request("http://localhost/api/settlements/reopen", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedVersion: 1 }) }), routeContext({ month }));
     expect(response.status).toBe(200);
 
-    expect((await syncSubscriptions()).created).toBe(1);
+    expect(await prisma.transaction.count()).toBe(1);
+    expect((await syncSubscriptions()).created).toBe(0);
   });
 });

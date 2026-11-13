@@ -49,8 +49,9 @@ export async function PATCH(request: Request, { params }: Context) {
       if (existing.deletedAt) throw conflict("这条账目已被删除，请先恢复后再编辑");
       const parsed = transactionEditSchema.parse(body);
       if (parsed.expectedVersion !== existing.version) throw conflict("账目已被其他操作修改，请刷新后重试");
+      if (existing.source === "SUBSCRIPTION" && parsed.type !== "expense") throw badRequest("订阅账目只能记录支出");
       if (await isMonthLocked(parsed.occurredOn.slice(0, 7), tx)) throw conflict("目标月份已经结算，请先重新打开本月");
-      await assertTransactionCategory(parsed.categoryId, parsed.type, tx);
+      if (parsed.categoryId !== existing.categoryId || parsed.type.toUpperCase() !== existing.type) await assertTransactionCategory(parsed.categoryId, parsed.type, tx);
       const data = transactionData(parsed);
       if (existing.reimbursedAt && (data.amountCents !== existing.amountCents || data.type !== existing.type || data.occurredOn.getTime() !== existing.occurredOn.getTime())) {
         throw conflict("这笔支出已报销，请先明确撤销报销，再修改金额、日期或收支类型");

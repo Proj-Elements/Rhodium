@@ -83,6 +83,14 @@ describe("import preview selection", () => {
     expect(state()).toMatchObject({ status: "ready", selection: { backup, rows: [] } });
   });
 
+  it.each(["budgets", "budgetPreset", "transactionHistory", "settlementHistory", "creationRequests"])("recognizes a legacy backup containing only %s metadata", async (field) => {
+    const { controller, state, request } = setup();
+    const backup = { [field]: field === "budgetPreset" ? null : [] };
+    await controller.select(file("legacy.json", JSON.stringify(backup)));
+    expect(state().status).toBe("ready");
+    expect(request).toHaveBeenCalledWith({ backup }, expect.any(AbortSignal));
+  });
+
   it.each([
     '{"rows":[{"note":"valid"},null]}',
     '{"version":1,"transactions":[[]]}',

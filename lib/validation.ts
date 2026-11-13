@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { moneyToCents } from "@/lib/domain";
+import { moneyToCents, parseDateOnly, parseMonth } from "@/lib/domain";
 import { categoryIconNames } from "@/lib/category-icons";
 
 const datePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -20,11 +20,12 @@ const dateValue = z
   .string()
   .regex(datePattern, "日期格式应为 YYYY-MM-DD")
   .refine((value) => {
-    const date = new Date(`${value}T00:00:00.000Z`);
-    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+    try { parseDateOnly(value); return true; } catch { return false; }
   }, "日期无效");
 
-const monthValue = z.string().regex(monthPattern, "月份格式应为 YYYY-MM");
+const monthValue = z.string().regex(monthPattern, "月份格式应为 YYYY-MM").refine((value) => {
+  try { parseMonth(value); return true; } catch { return false; }
+}, "月份超出有效范围");
 const categoryIconValue = z.enum(categoryIconNames).nullable().optional();
 
 export const transactionSchema = z.object({
@@ -42,6 +43,9 @@ export const transactionEditSchema = transactionSchema.extend({
 export const budgetSchema = z.object({
   amount: amountValue,
 });
+
+export const budgetEditSchema = budgetSchema.extend({ expectedVersion: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+export const expectedVersionSchema = z.object({ expectedVersion: z.number().int().positive().max(2_147_483_647) }).strict();
 
 export const subscriptionSchema = z
   .object({
@@ -61,8 +65,10 @@ export const subscriptionSchema = z
 
 /** Toggle-only body for PATCH /api/subscriptions/[id]. */
 export const subscriptionToggleSchema = z
-  .object({ active: z.boolean() })
+  .object({ active: z.boolean(), expectedVersion: z.number().int().positive() })
   .strict();
+
+export const subscriptionEditSchema = subscriptionSchema.safeExtend({ expectedVersion: z.number().int().positive() });
 
 /** Restore-only PATCH body for a soft-deleted transaction ({ restore: true }). */
 export const transactionRestoreSchema = z
@@ -95,8 +101,9 @@ export const categoryPatchSchema = z
     name: z.string().trim().min(1).max(30).optional(),
     archived: z.boolean().optional(),
     icon: categoryIconValue,
+    expectedVersion: z.number().int().positive(),
   })
   .strict()
-  .refine((body) => Object.keys(body).length > 0, "没有需要更新的字段");
+  .refine((body) => Object.keys(body).some((key) => key !== "expectedVersion"), "没有需要更新的字段");
 
 export { backupSchema, importSchema, type BackupPayload } from "@/lib/backup-validation";

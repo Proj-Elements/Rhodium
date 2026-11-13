@@ -4,6 +4,8 @@ import {
   categorySchema,
   subscriptionSchema,
   subscriptionToggleSchema,
+  subscriptionEditSchema,
+  budgetEditSchema,
   transactionReimburseSchema,
   transactionRestoreSchema,
   transactionSchema,
@@ -125,8 +127,9 @@ describe("subscriptionSchema", () => {
 
 describe("strict toggle and restore bodies", () => {
   it("accepts an exact toggle body and rejects extra keys", () => {
-    expect(subscriptionToggleSchema.safeParse({ active: false }).success).toBe(true);
-    expect(subscriptionToggleSchema.safeParse({ active: false, name: "x" }).success).toBe(false);
+    expect(subscriptionToggleSchema.safeParse({ active: false, expectedVersion: 1 }).success).toBe(true);
+    expect(subscriptionToggleSchema.safeParse({ active: false, expectedVersion: 1, name: "x" }).success).toBe(false);
+    expect(subscriptionToggleSchema.safeParse({ active: false }).success).toBe(false);
   });
 
   it("accepts only restore: true", () => {
@@ -182,22 +185,35 @@ describe("category schemas", () => {
 
   it("requires at least one field on patch and rejects unknown ones", () => {
     expect(categoryPatchSchema.safeParse({}).success).toBe(false);
-    expect(categoryPatchSchema.safeParse({ archived: true }).success).toBe(true);
+    expect(categoryPatchSchema.safeParse({ archived: true, expectedVersion: 1 }).success).toBe(true);
+    expect(categoryPatchSchema.safeParse({ expectedVersion: 1 }).success).toBe(false);
     expect(categoryPatchSchema.safeParse({ sortOrder: 2 }).success).toBe(false);
   });
 
   it("preserves a chosen icon on create and patch", () => {
     expect(categorySchema.parse({ name: "咖啡时间", icon: "coffee" })).toMatchObject({ icon: "coffee" });
-    expect(categoryPatchSchema.parse({ icon: "coffee" })).toEqual({ icon: "coffee" });
+    expect(categoryPatchSchema.parse({ icon: "coffee", expectedVersion: 1 })).toEqual({ icon: "coffee", expectedVersion: 1 });
   });
 
   it("allows automatic icons", () => {
     expect(categorySchema.parse({ name: "自动分类", icon: null })).toHaveProperty("icon", null);
-    expect(categoryPatchSchema.parse({ icon: null })).toEqual({ icon: null });
+    expect(categoryPatchSchema.parse({ icon: null, expectedVersion: 1 })).toEqual({ icon: null, expectedVersion: 1 });
   });
 
   it.each(["missing-icon", "https://example.com/icon.svg", "<svg />", "", 42])("rejects unsupported icon %j", (icon) => {
     expect(categorySchema.safeParse({ name: "分类", icon }).success).toBe(false);
     expect(categoryPatchSchema.safeParse({ icon }).success).toBe(false);
+  });
+});
+
+describe("observed resource versions", () => {
+  it.each([undefined, 0, -1, 1.5, "1"])("rejects subscription/category version %j", (expectedVersion) => {
+    expect(subscriptionEditSchema.safeParse({ ...validSubscription, expectedVersion }).success).toBe(false);
+    expect(categoryPatchSchema.safeParse({ name: "新分类", expectedVersion }).success).toBe(false);
+  });
+
+  it("requires a complete server budget token", () => {
+    expect(budgetEditSchema.safeParse({ amount: "10", expectedVersion: "a".repeat(64) }).success).toBe(true);
+    for (const expectedVersion of [undefined, 1, "stale", "a".repeat(63)]) expect(budgetEditSchema.safeParse({ amount: "10", expectedVersion }).success).toBe(false);
   });
 });

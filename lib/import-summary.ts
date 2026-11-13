@@ -1,4 +1,4 @@
-import type { Prisma } from "@prisma/client";
+import type { Category, Prisma } from "@prisma/client";
 import type { BackupPayload } from "@/lib/backup-validation";
 import type { NormalizedRow } from "@/lib/import-parser";
 import type { ImportSummary } from "@/lib/import-preview-controller";
@@ -7,6 +7,7 @@ import { getLockedMonths } from "@/lib/summary";
 import { canonicalBackupValue, restoreBackupHistory } from "@/lib/backup-history";
 import { importChunks } from "@/lib/import-batches";
 import { AppError } from "@/lib/errors";
+import { indexImportCategories, rememberImportCategory, resolveBackupCategory, resolveImportCategory } from "@/lib/import-categories";
 export { importChunks } from "@/lib/import-batches";
 
 /** Preview the same target identities that an atomic merge will mutate. */
@@ -14,49 +15,80 @@ export async function summarizeImport(db: Prisma.TransactionClient, rows: Normal
   const summary: ImportSummary = {
     transactions: { create: 0, update: 0, unchanged: 0 }, categories: { create: 0, update: 0 },
     subscriptions: { create: 0, update: 0 }, budgets: { create: 0, update: 0 }, settlements: { create: 0, update: 0 },
-    lockedMonths: [], conflicts: [],
+    budgetPreset: { create: 0, update: 0, delete: 0 }, lockedMonths: [], conflicts: [],
   };
-  if (backup) {
-    try { await restoreBackupHistory(db, backup, true); }
-    catch (error) {
-      if (error instanceof AppError) summary.conflicts.push(error.message);
-      else throw error;
-    }
-  }
   const existingRows = [];
   const ids = backup ? [...new Set(rows.flatMap((row) => row.externalId ? [row.externalId] : []))] : [];
   const idSet = new Set(ids);
   for (const batch of importChunks(ids)) existingRows.push(...await db.transaction.findMany({ where: { id: { in: batch } } }));
   const existingById = new Map(existingRows.map((row) => [row.id, row]));
   const [categories, subscriptions, budgets, settlements] = await Promise.all([
-    backup ? db.category.findMany() : Promise.resolve([]),
-    backup ? db.subscription.findMany({ select: { id: true } }) : Promise.resolve([]),
+    db.category.findMany(),
+    db.subscription.findMany({ select: { id: true } }),
     backup?.budgets?.length ? db.monthlyBudget.findMany({ select: { month: true } }) : Promise.resolve([]),
     backup?.settlements?.length ? db.monthlySettlement.findMany({ select: { month: true } }) : Promise.resolve([]),
   ]);
+  if (backup?.budgetPreset !== undefined) {
+    const preset = await db.budgetPreset.findUnique({ where: { id: 1 } });
+    if (backup.budgetPreset === null) summary.budgetPreset.delete = preset ? 1 : 0;
+    else if (!preset) summary.budgetPreset.create = 1;
+    else if (preset.amountCents !== backup.budgetPreset.amountCents) summary.budgetPreset.update = 1;
+  }
   const mappedCategories = new Map<string, string>();
+  const categoryIndex = indexImportCategories(categories);
   const categoryKeys = new Set(categories.map((row) => `${row.name}|${row.type}`));
-  const categoryByKey = new Map(categories.map((row) => [`${row.name}|${row.type}`, row]));
-  const categoryIds = new Set(categories.map((row) => row.id));
   for (const row of backup?.categories ?? []) {
-    const key = `${row.name}|${(row.type ?? "EXPENSE").toUpperCase()}`;
-    const existing = categoryByKey.get(key);
-    mappedCategories.set(row.id, existing?.id ?? row.id);
-    if (categoryKeys.has(key)) summary.categories.update += 1;
-    else summary.categories.create += 1;
-    if (!existing && categoryIds.has(row.id)) summary.conflicts.push(`分类 ID ${row.id} 已被其他分类占用`);
+    try {
+      const existing = resolveBackupCategory(categoryIndex, row);
+      mappedCategories.set(row.id, existing?.id ?? row.id);
+      summary.categories[existing ? "update" : "create"] += 1;
+      rememberImportCategory(categoryIndex, {
+        id: existing?.id ?? row.id, name: row.name, type: (row.type ?? "EXPENSE").toUpperCase() as Category["type"],
+        icon: row.icon ?? existing?.icon ?? null,
+        systemKey: row.systemKey ?? existing?.systemKey ?? null, isSystem: Boolean(row.systemKey) || existing?.isSystem || false,
+        version: existing?.version ?? 1, sortOrder: row.sortOrder ?? existing?.sortOrder ?? 0,
+        archivedAt: row.archivedAt !== undefined ? row.archivedAt ? new Date(row.archivedAt) : null : existing?.archivedAt ?? null,
+        billingPauses: row.billingPauses ?? existing?.billingPauses ?? [],
+        createdAt: existing?.createdAt ?? new Date(0), updatedAt: existing?.updatedAt ?? new Date(0),
+      });
+    } catch (error) {
+      if (error instanceof AppError) summary.conflicts.push(error.message);
+      else throw error;
+    }
+  }
+  if (backup) {
+    try { await restoreBackupHistory(db, backup, true, mappedCategories); }
+    catch (error) {
+      if (error instanceof AppError) summary.conflicts.push(error.message);
+      else throw error;
+    }
   }
   const subscriptionIds = new Set(subscriptions.map((row) => row.id));
   for (const row of backup?.subscriptions ?? []) summary.subscriptions[subscriptionIds.has(row.id) ? "update" : "create"] += 1;
   const categoryTypes = new Map(categories.map((row) => [row.id, String(row.type)]));
   for (const row of backup?.categories ?? []) categoryTypes.set(mappedCategories.get(row.id) ?? row.id, (row.type ?? "EXPENSE").toUpperCase());
   const availableSubscriptions = new Set([...subscriptionIds, ...(backup?.subscriptions ?? []).map((row) => row.id)]);
+  for (const row of rows) {
+    if (row.subscriptionId && !availableSubscriptions.has(row.subscriptionId)) summary.conflicts.push(`账目关联的订阅不存在：${row.subscriptionId}`);
+    if (row.source === "SUBSCRIPTION" && row.type !== "EXPENSE") summary.conflicts.push("订阅发生记录必须是支出");
+    if (!backup) {
+      try {
+        const resolved = resolveImportCategory(categoryIndex, row);
+        if (!resolved.existing && !categoryKeys.has(`${resolved.name}|${row.type}`)) {
+          summary.categories.create += 1;
+          categoryKeys.add(`${resolved.name}|${row.type}`);
+        }
+      } catch (error) {
+        if (error instanceof AppError) summary.conflicts.push(error.message);
+        else throw error;
+      }
+    }
+  }
   if (backup) {
     for (const row of rows) {
       const categoryId = mappedCategories.get(row.categoryId ?? "") ?? row.categoryId;
       const categoryType = categoryId ? categoryTypes.get(categoryId) : undefined;
       if (!categoryType || (categoryType !== "BOTH" && categoryType !== row.type)) summary.conflicts.push(`备份账目 ${row.externalId ?? ""} 的分类不存在或收支类型不匹配`);
-      if (row.subscriptionId && !availableSubscriptions.has(row.subscriptionId)) summary.conflicts.push(`账目关联的订阅不存在：${row.subscriptionId}`);
     }
     for (const row of backup.subscriptions ?? []) {
       const categoryType = categoryTypes.get(mappedCategories.get(row.categoryId) ?? row.categoryId);
@@ -131,5 +163,6 @@ export async function summarizeImport(db: Prisma.TransactionClient, rows: Normal
       if (canonicalBackupValue(Object.fromEntries(actual)) !== canonicalBackupValue(Object.fromEntries(expected))) summary.conflicts.push(`${settlement.month.slice(0, 7)} 的分类快照与合并后的账目不一致`);
     }
   }
+  summary.conflicts = [...new Set(summary.conflicts)];
   return summary;
 }

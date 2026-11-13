@@ -96,7 +96,7 @@ describe("immutable ledger history", () => {
     await prisma.category.update({ where: { id: category.id }, data: { name: "餐饮新名称" } });
     expect((await getMonthSummary(MONTH)).topCategory?.name).toBe("餐饮");
     expect((await (await settleMonth(new Request("http://localhost", { method: "POST" }), context)).json()).settlement.revision).toBe(1);
-    expect((await reopenMonth(new Request("http://localhost", { method: "POST" }), context)).status).toBe(200);
+    expect((await reopenMonth(new Request("http://localhost", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedVersion: first.settlement.revision }) }), context)).status).toBe(200);
     const third = await (await settleMonth(new Request("http://localhost", { method: "POST" }), context)).json();
     expect(third.settlement.revision).toBe(3);
     expect(third.settlement.categorySnapshot).toMatchObject([{ categoryName: "餐饮新名称", expenseCents: 1234, outOfPocketCents: 1234 }]);

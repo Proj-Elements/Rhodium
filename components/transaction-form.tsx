@@ -62,8 +62,9 @@ export function TransactionForm({ categories, transaction, defaultDate, onClose,
   }, [error]);
 
   const availableCategories = useMemo(() => categories.filter((category) =>
-    !category.archivedAt && (category.type === "BOTH" || category.type === (type === "expense" ? "EXPENSE" : "INCOME")),
-  ), [categories, type]);
+    (!category.archivedAt || (category.id === transaction?.category.id && transaction.type.toLowerCase() === type)) &&
+    (category.type === "BOTH" || category.type === (type === "expense" ? "EXPENSE" : "INCOME")),
+  ), [categories, type, transaction]);
 
   useEffect(() => {
     if (!categoryId && availableCategories.length === 1) setCategoryId(availableCategories[0].id);
@@ -145,7 +146,7 @@ export function TransactionForm({ categories, transaction, defaultDate, onClose,
       <div className="flex flex-col gap-2">
         <span className="field-label" id="entry-category-label">选择分类</span>
         <RadioGroup aria-labelledby="entry-category-label" name="categoryId" value={categoryId} onChange={setCategoryId} isRequired isDisabled={saving} className="category-grid grid min-w-0 grid-cols-4 gap-1.5 sm:grid-cols-5">
-          {availableCategories.map((category) => <Radio key={category.id} value={category.id} className="min-w-0 w-full"><Radio.Content className="category-choice w-full"><CategoryIcon categoryName={category.name} type={type === "income" ? "INCOME" : "EXPENSE"} icon={category.icon} size={20} /><span>{category.name}</span></Radio.Content></Radio>)}
+          {availableCategories.map((category) => <Radio key={category.id} value={category.id} className="min-w-0 w-full"><Radio.Content className="category-choice w-full"><CategoryIcon categoryName={category.name} type={type === "income" ? "INCOME" : "EXPENSE"} icon={category.icon} size={20} /><span>{category.name}{category.archivedAt ? "（已停用）" : ""}</span></Radio.Content></Radio>)}
         </RadioGroup>
         {!availableCategories.length && <p className="text-xs text-warning">没有可用分类，请先到设置中添加。</p>}
       </div>

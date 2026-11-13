@@ -1,5 +1,7 @@
 "use client";
 
+import { announceLedgerUpdate } from "@/lib/ledger-events";
+
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number) {
     super(message);
@@ -49,6 +51,7 @@ export async function apiFetch<T>(input: string, init?: RequestInit & { json?: u
       throw new ApiError(typeof message === "string" && message ? message : "请求失败，请稍后再试", response.status);
     }
     if (!objectPayload) throw new Error("服务器返回的数据格式不正确");
+    if (mutation && !input.startsWith("/api/import/preview") && typeof window !== "undefined") announceLedgerUpdate();
     return payload as T;
   } catch (error) {
     if (controller.signal.aborted) throw controller.signal.reason;

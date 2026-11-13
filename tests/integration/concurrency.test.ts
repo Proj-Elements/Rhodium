@@ -11,6 +11,7 @@ import { monthStart, todayInShanghai } from "@/lib/domain";
 import { getMonthSummary } from "@/lib/summary";
 import { subscriptionPlanData, syncSubscriptions } from "@/lib/subscriptions";
 import { initialBillingHistory } from "@/lib/billing-history";
+import { budgetVersion } from "@/lib/budget-version";
 import { addTransaction, createCategory, prisma, resetDatabase, routeContext } from "./helpers";
 
 function deferred() {
@@ -92,6 +93,7 @@ describe("ledger write serialization", () => {
       if (operation === "restore") await prisma.transaction.update({ where: { id: row.id }, data: { deletedAt: new Date() } });
       if (operation === "unreimburse") await prisma.transaction.update({ where: { id: row.id }, data: { reimbursedAt: new Date() } });
       const original = await prisma.transaction.findUniqueOrThrow({ where: { id: row.id } });
+      const observedBudgetVersion = await budgetVersion(prisma, "2024-05");
       const paused = deferred();
       const resume = deferred();
       intercept = async (params, next) => {
@@ -112,7 +114,7 @@ describe("ledger write serialization", () => {
           : operation === "import"
             ? importLedger(request("/api/import", "POST", { format: "json", rows: [body] }))
             : operation === "budget"
-              ? putBudget(request("/api/budgets/2024-05", "PUT", { amount: "20" }), routeContext({ month: "2024-05" }))
+              ? putBudget(request("/api/budgets/2024-05", "PUT", { amount: "20", expectedVersion: observedBudgetVersion }), routeContext({ month: "2024-05" }))
               : patchTransaction(request(`/api/transactions/${row.id}`, "PATCH",
                 ["restore", "reimburse", "unreimburse"].includes(operation)
                   ? { [operation]: true, expectedVersion: original.version }
@@ -178,7 +180,7 @@ describe("ledger write serialization", () => {
     const syncing = syncSubscriptions();
     await paused.promise;
     lockAttempt = deferred();
-    const pausing = patchSubscription(request(`/api/subscriptions/${subscription.id}`, "PATCH", { active: false }), routeContext({ id: subscription.id }))
+    const pausing = patchSubscription(request(`/api/subscriptions/${subscription.id}`, "PATCH", { active: false, expectedVersion: subscription.version }), routeContext({ id: subscription.id }))
       .then((response) => { events.push("pause-returned"); return response; });
     await releaseWhenContenderStarts(pausing, resume.resolve);
     const [, response] = await Promise.all([syncing, pausing]);
@@ -207,7 +209,7 @@ describe("ledger write serialization", () => {
       }
       return result;
     };
-    const deleting = deleteSubscription(request(`/api/subscriptions/${subscription.id}`, "DELETE"), routeContext({ id: subscription.id }));
+    const deleting = deleteSubscription(request(`/api/subscriptions/${subscription.id}?expectedVersion=${subscription.version}`, "DELETE"), routeContext({ id: subscription.id }));
     await paused.promise;
     lockAttempt = deferred();
     const syncing = syncSubscriptions();

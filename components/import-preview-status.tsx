@@ -41,6 +41,12 @@ export function ImportPreviewStatus({ state, busy, disabled, onConfirm, onCancel
       <Alert.Content>
         <Alert.Title>{issues.length ? "文件或目标账本需要处理" : "文件检查通过"}</Alert.Title>
         <Alert.Description>{preview.valid} / {preview.total} 条记录可导入</Alert.Description>
+        {preview.summary && <div className="mt-3 flex flex-col gap-1 text-xs" aria-label="导入变更摘要">
+          <p>账目：新增 {preview.summary.transactions.create}，修改 {preview.summary.transactions.update}，不变 {preview.summary.transactions.unchanged}</p>
+          <p>分类：新增 {preview.summary.categories.create}，修改 {preview.summary.categories.update}；固定支出：新增 {preview.summary.subscriptions.create}，修改 {preview.summary.subscriptions.update}</p>
+          <p>月度预算：新增 {preview.summary.budgets.create}，修改 {preview.summary.budgets.update}；结算：新增 {preview.summary.settlements.create}，修改 {preview.summary.settlements.update}</p>
+          <p>默认预算：新增 {preview.summary.budgetPreset.create}，修改 {preview.summary.budgetPreset.update}，删除 {preview.summary.budgetPreset.delete}</p>
+        </div>}
         {issues.length > 0 && <ul className="mt-2 list-disc space-y-1 pl-4 text-xs">
           {[...new Set(issues)].slice(0, 5).map((item) => <li key={item}>{item}</li>)}
         </ul>}

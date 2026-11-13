@@ -18,6 +18,11 @@ vi.mock("@/lib/prisma", () => ({
     $executeRaw: vi.fn(),
   },
 }));
+vi.mock("@/lib/budget-version", async (original) => ({
+  ...await original<typeof import("@/lib/budget-version")>(),
+  budgetVersion: vi.fn(async () => "a".repeat(64)),
+  assertBudgetVersion: vi.fn(async () => {}),
+}));
 
 const { prisma } = await import("@/lib/prisma");
 const { GET, PUT } = await import("@/app/api/budgets/[month]/route");
@@ -36,7 +41,7 @@ function put(month: string, scope?: string, amount = "1500.00") {
   const request = new Request(`http://localhost/api/budgets/${month}${query}`, {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ amount }),
+    body: JSON.stringify({ amount, expectedVersion: "a".repeat(64) }),
   });
   return PUT(request, { params: Promise.resolve({ month }) });
 }
@@ -63,7 +68,7 @@ describe("GET /api/budgets/[month]", () => {
     const response = await GET(new Request("http://localhost/api/budgets/2026-03"), { params: Promise.resolve({ month: "2026-03" }) });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       budget: { amountCents: 200_000 },
       preset: { amountCents: 300_000 },
       effectiveBudgetCents: 200_000,
@@ -81,7 +86,7 @@ describe("PUT /api/budgets/[month]", () => {
     const response = await put("2026-03");
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual({ budget: { amountCents: 150_000 }, scope: "month" });
+    await expect(response.json()).resolves.toMatchObject({ budget: { amountCents: 150_000 }, scope: "month", version: "a".repeat(64) });
     expect(upsert).toHaveBeenCalledTimes(1);
     expect(upsert.mock.calls[0][0].where.month.toISOString()).toBe("2026-03-01T00:00:00.000Z");
     expect(createMany).not.toHaveBeenCalled();
@@ -91,7 +96,7 @@ describe("PUT /api/budgets/[month]", () => {
   it("materialises a bounded horizon for scope=future instead of every later month", async () => {
     const response = await put("2026-03", "future");
 
-    await expect(response.json()).resolves.toEqual({
+    await expect(response.json()).resolves.toMatchObject({
       budget: { amountCents: 150_000 },
       scope: "future",
       monthsSet: HORIZON_MONTHS,

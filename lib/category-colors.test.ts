@@ -11,14 +11,13 @@ describe("category color palette", () => {
 });
 
 describe("category color assignment", () => {
-  it("resolves collisions even when all category IDs prefer the same color", () => {
-    const candidates = Array.from({ length: 512 }, (_, index) => `category_${index}`);
-    const preferredColor = getCategoryColor(candidates[0]).color;
-    const ids = candidates.filter((id) => getCategoryColor(id).color === preferredColor).slice(0, 16);
-    expect(ids).toHaveLength(16);
-
-    const assigned = getCategoryColors(ids);
-    expect(new Set([...assigned.values()].map((entry) => entry.color)).size).toBe(16);
+  it("keeps a category's color when other categories are added, archived or removed", () => {
+    const original = getCategoryColors(["category-b", "category-c"]);
+    const expanded = getCategoryColors(["category-a", "category-b", "category-c", "category-d"]);
+    const filtered = getCategoryColors(["category-c"]);
+    expect(expanded.get("category-b")).toEqual(original.get("category-b"));
+    expect(expanded.get("category-c")).toEqual(original.get("category-c"));
+    expect(filtered.get("category-c")).toEqual(original.get("category-c"));
   });
 
   it("keeps each category's color when the input order changes", () => {

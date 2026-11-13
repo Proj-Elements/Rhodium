@@ -5,6 +5,17 @@ import { isBillingPaused } from "@/lib/billing-pauses";
 
 export type SubscriptionState = "current" | "upcoming" | "ended" | "paused" | "archived";
 
+export function subscriptionCountsForMonth(subscription: SubscriptionDTO, today: string): boolean {
+  const month = today.slice(0, 7);
+  const plan = effectiveBillingPlan(subscription.billingHistory, month);
+  if (!plan || plan.startMonth > month || (plan.endMonth && plan.endMonth < month)) return false;
+  const date = dateOnlyKey(billingDate(month, plan.billingDay));
+  const category = subscription.currentCategory ?? subscription.category;
+  if (category.id !== plan.categoryId) return false;
+  if ((!subscription.active && !subscription.billingPauses.length) || (category.archivedAt && !category.billingPauses?.length)) return false;
+  return !isBillingPaused([...subscription.billingPauses, ...(category.billingPauses ?? [])], date);
+}
+
 /** Classify display state without treating future, expired or archived items as current spending. */
 export function subscriptionState(subscription: SubscriptionDTO, today: string): SubscriptionState {
   if (!subscription.active) return "paused";

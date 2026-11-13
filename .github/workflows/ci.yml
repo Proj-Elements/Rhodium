@@ -159,6 +159,8 @@ jobs:
           npm run typecheck
           npm run lint
           node --test scripts/*.test.mjs
+          node scripts/ci-assets.mjs fonts
+          node scripts/ci-assets.mjs api
           npm test
           npm run test:db
           npm run build

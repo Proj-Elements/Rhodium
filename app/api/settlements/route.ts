@@ -13,7 +13,9 @@ export async function GET(request: Request) {
     // include=focus returns the `end` month's full summary in the same response,
     // so the settlements page needs a single request instead of two.
     const includeFocus = url.searchParams.get("include") === "focus";
-    const months = Array.from({ length: 6 }, (_, index) => addMonths(end, index - 5));
+    const availableMonths = (Number(end.slice(0, 4)) - 1) * 12 + Number(end.slice(5, 7));
+    const length = Math.min(6, availableMonths);
+    const months = Array.from({ length }, (_, index) => addMonths(end, index - length + 1));
     const summaries = await getMonthSummaries(months);
     // `end` is the last element, so focus reuses it instead of recomputing.
     const focus = summaries[summaries.length - 1] ?? null;

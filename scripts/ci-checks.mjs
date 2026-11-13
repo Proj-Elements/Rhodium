@@ -9,7 +9,7 @@ const scopeFile = resolve(process.env.RUNNER_TEMP || "/tmp", "rhodium-ci-scope.j
 const shaPattern = /^[0-9a-f]{40}$/;
 const sourcePattern = /\.(?:[cm]?js|tsx?|json|css)$/;
 const frontendPath = (path) => /^(?:components\/|app\/(?!api\/))/.test(path) && sourcePattern.test(path);
-const sourcePath = (path) => (path === "middleware.ts" || /^(?:app|components|lib|tests)\//.test(path)) && sourcePattern.test(path);
+const sourcePath = (path) => (["middleware.ts", "instrumentation.ts"].includes(path) || /^(?:app|components|lib|tests)\//.test(path)) && sourcePattern.test(path);
 
 export function dependencyClosure(roots, files, readSource) {
   const known = new Set(files);
@@ -40,7 +40,7 @@ function dependencyScopes(revision) {
   };
   return {
     frontend: dependencyClosure(files.filter((path) => frontendPath(path) && !/\.test\./.test(path)), files, readSource),
-    database: dependencyClosure(files.filter((path) => path.startsWith("app/api/") || path.startsWith("tests/integration/")), files, readSource),
+    database: dependencyClosure(files.filter((path) => path === "instrumentation.ts" || path.startsWith("app/api/") || path.startsWith("tests/integration/")), files, readSource),
   };
 }
 
@@ -65,20 +65,23 @@ export function scopeFor(paths, present = () => true, dependencies = {}) {
   const seeds = tooling ? ["lib/domain.test.ts", "lib/validation.test.ts", "lib/summary.test.ts", "lib/import-parser.test.ts", "lib/theme.test.ts"] : [];
   const schema = paths.some((path) => path.startsWith("prisma/"));
   const container = paths.some((path) => /^(?:Dockerfile|\.dockerignore|docker-compose\.yml|Docker\/docker-compose\.yml|scripts\/container-entrypoint\.mjs)$/.test(path));
-  const frontend = paths.some((path) => frontendPath(path) || /^(?:app\/(?!api\/)|public\/(?!skill\/)).*\.(?:svg|ico|png|jpe?g|webp|woff2?)$/.test(path) || dependencies.frontend?.has(path));
-  const build = container || buildTooling || frontend;
+  const frontend = paths.some((path) => frontendPath(path) || /^(?:app\/(?!api\/)|public\/(?!skill\/)).*\.(?:svg|ico|png|jpe?g|webp|woff2?|ttf|otf)$/.test(path) || dependencies.frontend?.has(path));
+  const build = container || buildTooling || frontend || paths.includes("instrumentation.ts");
+  const assetChecker = paths.some((path) => path.startsWith("scripts/ci-assets"));
   const dbSeeds = schema || tooling ? ["tests/integration/budget.test.ts", "tests/integration/reimburse.test.ts", "tests/integration/category-icons.test.ts"] : [];
   return {
     sources: [...new Set([...sources, ...seeds])],
     dbSources: [...new Set([...sources, ...dbSeeds])],
-    database: container || schema || tooling || paths.some((path) => dependencies.database?.has(path) || /^(?:app\/api\/|tests\/integration\/|lib\/(?:api|budget|domain|errors|import-parser|ledger-write|prisma|rate-limit|seed|serializers|subscription-planner|subscription-serializer|subscriptions|summary|test-database|transactions|validation)\.)/.test(path)),
+    database: container || schema || tooling || paths.includes("instrumentation.ts") || paths.some((path) => dependencies.database?.has(path) || /^(?:app\/api\/|tests\/integration\/|lib\/(?:api|budget|domain|errors|import-parser|ledger-write|prisma|rate-limit|seed|serializers|subscription-planner|subscription-serializer|subscriptions|summary|test-database|transactions|validation)\.)/.test(path)),
     databaseScope: schema ? "all" : "related",
     typecheck: tooling || schema || sources.some((path) => /\.tsx?$/.test(path)),
     licensed: build,
     build,
     container,
     lint: paths.filter((path) => /\.(?:[cm]?js|tsx?)$/.test(path) && present(path)),
-    selectorTests: paths.some((path) => /^scripts\/ci-(?:checks|licensed)/.test(path)),
+    fontAssets: assetChecker || paths.some((path) => path.startsWith("public/fonts/") || path === "app/globals.css"),
+    apiDocs: assetChecker || paths.some((path) => path.startsWith("public/skill/") || /^app\/api\/.*\/route\.ts$/.test(path) || path === "lib/validation.ts"),
+    selectorTests: paths.some((path) => /^scripts\/ci-(?:checks|licensed|assets)/.test(path)),
     scriptTests: [...new Set(paths.filter((path) => /^scripts\/.*\.mjs$/.test(path) && !/^scripts\/ci-/.test(path)).map((path) => path.endsWith(".test.mjs") ? path : path.replace(/\.mjs$/, ".test.mjs")).filter(present))],
   };
 }
@@ -116,7 +119,9 @@ function verify() {
   const scope = JSON.parse(readFileSync(scopeFile, "utf8"));
   if (git("rev-parse", "HEAD") !== scope.head) throw new Error("Candidate changed since selection");
   git("diff", "--check", scope.base, scope.head);
-  if (scope.selectorTests) invoke("--test", "scripts/ci-checks.test.mjs", "scripts/ci-licensed.test.mjs");
+  if (scope.selectorTests) invoke("--test", "scripts/ci-checks.test.mjs", "scripts/ci-licensed.test.mjs", "scripts/ci-assets.test.mjs");
+  if (scope.fontAssets) invoke("scripts/ci-assets.mjs", "fonts");
+  if (scope.apiDocs) invoke("scripts/ci-assets.mjs", "api");
   if (scope.scriptTests.length) invoke("--test", ...scope.scriptTests);
   if (scope.lint.length) invoke("node_modules/eslint/bin/eslint.js", ...scope.lint, "--max-warnings", "0");
   if (scope.typecheck) invoke("node_modules/typescript/bin/tsc", "--noEmit", "--project", scope.licensed ? "tsconfig.json" : "tsconfig.server.json");

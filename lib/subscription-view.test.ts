@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { applySubscriptionRemoval, nextSubscriptionDate, subscriptionState } from "./subscription-view";
+import { applySubscriptionRemoval, nextSubscriptionDate, subscriptionCountsForMonth, subscriptionState } from "./subscription-view";
 import type { SubscriptionDTO } from "./types";
 import { initialBillingHistory, scheduleBillingPlan } from "./billing-history";
 
 const item: SubscriptionDTO = {
-  id: "subscription-1", name: "校园网", amountCents: 3000, billingDay: 31, categoryId: "category-1",
-  category: { id: "category-1", name: "生活", type: "EXPENSE", icon: null, isSystem: true, sortOrder: 0, archivedAt: null },
+  id: "subscription-1", version: 1, name: "校园网", amountCents: 3000, billingDay: 31, categoryId: "category-1",
+  category: { id: "category-1", version: 1, name: "生活", type: "EXPENSE", icon: null, isSystem: true, sortOrder: 0, archivedAt: null },
   startMonth: "2026-01-01", endMonth: null, active: true, note: null,
   billingHistory: [], billingPauses: [], billingEffectiveMonth: null, currentAmountCents: null, currentCategory: null,
 };
@@ -21,6 +21,27 @@ describe("subscription display state", () => {
 
   it("includes the whole inclusive end month", () => {
     expect(subscriptionState({ ...item, endMonth: "2026-11-01" }, "2026-11-30")).toBe("current");
+  });
+});
+
+describe("monthly planned fixed spending", () => {
+  const plan = { name: item.name, amountCents: 3000, categoryId: item.categoryId, billingDay: 5, startMonth: "2026-01", endMonth: null, note: null };
+  const subscription = { ...item, billingHistory: initialBillingHistory(plan) };
+
+  it("retains a charge due before a later pause", () => {
+    expect(subscriptionCountsForMonth({ ...subscription, active: false, billingPauses: [{ start: "2026-11-13", end: null }] }, "2026-11-13")).toBe(true);
+    expect(subscriptionCountsForMonth({ ...subscription, active: false, billingPauses: [{ start: "2026-11-01", end: null }] }, "2026-11-13")).toBe(false);
+  });
+
+  it("uses the category's pause at the billing date", () => {
+    expect(subscriptionCountsForMonth({ ...subscription, category: { ...item.category, archivedAt: "2026-11-13", billingPauses: [{ start: "2026-11-13", end: null }] } }, "2026-11-13")).toBe(true);
+    expect(subscriptionCountsForMonth({ ...subscription, category: { ...item.category, archivedAt: "2026-11-01", billingPauses: [{ start: "2026-11-01", end: null }] } }, "2026-11-13")).toBe(false);
+  });
+
+  it("uses the current historical plan when a future category change is scheduled", () => {
+    const billingHistory = scheduleBillingPlan(subscription.billingHistory, { ...plan, categoryId: "future-category", amountCents: 5000 }, "2026-11-03");
+    expect(subscriptionCountsForMonth({ ...subscription, categoryId: "future-category", category: { ...item.category, id: "future-category" }, currentCategory: item.category, billingHistory }, "2026-11-13")).toBe(true);
+    expect(subscriptionCountsForMonth({ ...subscription, billingHistory: initialBillingHistory({ ...plan, startMonth: "2026-12" }) }, "2026-11-13")).toBe(false);
   });
 });
 

@@ -3,7 +3,8 @@ import { handleApiError, parseJsonBody, monthRange } from "@/lib/api";
 import { addMonths, moneyToCents, monthKey, monthStart, parseMonth } from "@/lib/domain";
 import { conflict } from "@/lib/errors";
 import { withLedgerRead, withLedgerWrite } from "@/lib/ledger-write";
-import { budgetSchema } from "@/lib/validation";
+import { budgetEditSchema } from "@/lib/validation";
+import { assertBudgetVersion, budgetVersion, budgetHorizon } from "@/lib/budget-version";
 import { isMonthLocked } from "@/lib/summary";
 import { getBudgetPreset, resolveBudget } from "@/lib/budget";
 import { z } from "zod";
@@ -25,8 +26,6 @@ const putQuerySchema = z.object({
  * unbounded `updateMany({ month: { gte } })` that silently overwrote budgets the
  * user had set past this window.
  */
-const FUTURE_MONTH_LIMIT = 240; // 20 years of rows, plenty for a personal ledger.
-
 export async function GET(_request: Request, { params }: Context) {
   try {
     const { month } = await params;
@@ -46,6 +45,9 @@ export async function GET(_request: Request, { params }: Context) {
         effectiveBudgetCents: resolved.amountCents,
         source: resolved.source,
         locked,
+        version: await budgetVersion(tx, month),
+        futureVersion: await budgetVersion(tx, month, true),
+        presetVersion: await budgetVersion(tx),
       });
     });
   } catch (error) {
@@ -58,16 +60,17 @@ export async function PUT(request: Request, { params }: Context) {
     const { month } = await params;
     parseMonth(month);
     const { scope } = putQuerySchema.parse(Object.fromEntries(new URL(request.url).searchParams));
-    const body = budgetSchema.parse(await parseJsonBody(request));
+    const body = budgetEditSchema.parse(await parseJsonBody(request));
     return await withLedgerWrite(async (tx) => {
       if (await isMonthLocked(month, tx)) throw conflict("本月已经结算，请先重新打开本月");
+      await assertBudgetVersion(tx, body.expectedVersion, month, scope === "future");
       const amountCents = moneyToCents(body.amount);
       const monthDate = monthRange(month).start;
 
       if (scope === "future") {
-        // Explicit rows for [month, month + FUTURE_MONTH_LIMIT). Anything past the
-        // horizon is deliberately left alone.
-        const horizonEnd = monthStart(addMonths(month, FUTURE_MONTH_LIMIT - 1));
+        // Explicit rows stop at the 20-year horizon or the last supported month.
+        const horizonLength = budgetHorizon(month);
+        const horizonEnd = monthStart(addMonths(month, horizonLength - 1));
         // Settled months keep their own budget: rewriting one would desync the
         // snapshot already stored in MonthlySettlement.
         const locked = await tx.monthlySettlement.findMany({
@@ -75,36 +78,38 @@ export async function PUT(request: Request, { params }: Context) {
           select: { month: true },
         });
         const lockedKeys = new Set(locked.map((row) => monthKey(row.month)));
-        const rows = Array.from({ length: FUTURE_MONTH_LIMIT }, (_, index) => monthStart(addMonths(month, index)))
+        const rows = Array.from({ length: horizonLength }, (_, index) => monthStart(addMonths(month, index)))
           .filter((rowMonth) => !lockedKeys.has(monthKey(rowMonth)))
           .map((rowMonth) => ({ month: rowMonth, amountCents }));
         await tx.monthlyBudget.createMany({ data: rows, skipDuplicates: true });
         // Re-assert the amount for rows that already existed with another value.
         await tx.monthlyBudget.updateMany({
           where: { month: { gte: monthDate, lte: horizonEnd, notIn: locked.map((row) => row.month) } },
-          data: { amountCents },
+          data: { amountCents, version: { increment: 1 } },
         });
-        return NextResponse.json({ budget: { amountCents }, scope, monthsSet: rows.length, throughMonth: monthKey(horizonEnd) });
+        return NextResponse.json({ budget: { amountCents }, scope, monthsSet: rows.length, throughMonth: monthKey(horizonEnd), version: await budgetVersion(tx, month), futureVersion: await budgetVersion(tx, month, true) });
       }
 
       const budget = await tx.monthlyBudget.upsert({
         where: { month: monthDate },
         create: { month: monthDate, amountCents },
-        update: { amountCents },
+        update: { amountCents, version: { increment: 1 } },
       });
-      return NextResponse.json({ budget: { amountCents: budget.amountCents }, scope });
+      return NextResponse.json({ budget: { amountCents: budget.amountCents }, scope, version: await budgetVersion(tx, month), futureVersion: await budgetVersion(tx, month, true) });
     });
   } catch (error) {
     return handleApiError(error);
   }
 }
 
-export async function DELETE(_request: Request, { params }: Context) {
+export async function DELETE(request: Request, { params }: Context) {
   try {
     const { month } = await params;
     parseMonth(month);
+    const expectedVersion = new URL(request.url).searchParams.get("expectedVersion") ?? "";
     return await withLedgerWrite(async (tx) => {
       if (await isMonthLocked(month, tx)) throw conflict("本月已经结算，请先重新打开本月");
+      await assertBudgetVersion(tx, expectedVersion, month);
       await tx.monthlyBudget.deleteMany({ where: { month: monthStart(month) } });
       return NextResponse.json({ deleted: true, month });
     });

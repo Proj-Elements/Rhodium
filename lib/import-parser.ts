@@ -132,6 +132,8 @@ export function normalizeRow(row: Row, restoringBackup = false): NormalizedRow {
   const source = (rawSource === "SUBSCRIPTION" || rawSource === "订阅") && subscriptionId ? ("SUBSCRIPTION" as const) : ("MANUAL" as const);
   const subscriptionMonth = optionalDate(row.subscriptionMonth, "订阅月份");
   if (subscriptionMonth && subscriptionMonth.getUTCDate() !== 1) throw new Error("订阅月份必须是月初日期");
+  if (source === "MANUAL" && (subscriptionId || subscriptionMonth || row.subscriptionOccurrenceKey)) throw new Error("手动账目不能包含订阅关联");
+  if (source === "SUBSCRIPTION" && type !== "EXPENSE") throw new Error("订阅发生记录必须是支出");
   const createdAt = optionalDateTime(row.createdAt, "创建时间");
   const updatedAt = optionalDateTime(row.updatedAt, "更新时间");
   if (createdAt && updatedAt && updatedAt < createdAt) throw new Error("更新时间不能早于创建时间");

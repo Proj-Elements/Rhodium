@@ -5,6 +5,8 @@ import { POST as previewImport } from "@/app/api/import/preview/route";
 import { PATCH as editTransaction } from "@/app/api/transactions/[id]/route";
 import { POST as settleMonth } from "@/app/api/settlements/[month]/settle/route";
 import { monthStart, parseDateOnly } from "@/lib/domain";
+import { transactionSnapshot } from "@/lib/transaction-history";
+import { serializeSettlement } from "@/lib/serializers";
 import { prisma, resetDatabase, routeContext } from "./helpers";
 
 function importRequest(backup: Record<string, unknown>, rows: unknown[] = []) {
@@ -205,7 +207,7 @@ describe("lossless JSON backup restore", () => {
   it("keeps a newer archived revision when its accounting values already match", async () => {
     const category = await prisma.category.create({ data: { name: "相同内容新版本" } });
     const transaction = await prisma.transaction.create({ data: { id: "same-values", type: "EXPENSE", categoryId: category.id, amountCents: 100, occurredOn: monthStart("2024-05") } });
-    const backup = { version: 2, transactions: [{ ...transaction, occurredOn: "2024-05-01", version: 5 }], transactionHistory: [{ id: "newer-history", transactionId: transaction.id, version: 5, action: "edit", after: { id: transaction.id, version: 5 }, recordedAt: "2024-05-01T00:00:00.000Z" }] };
+    const backup = { version: 2, transactions: [{ ...transaction, occurredOn: "2024-05-01", version: 5 }], transactionHistory: [{ id: "newer-history", transactionId: transaction.id, version: 5, action: "edit", after: transactionSnapshot({ ...transaction, version: 5 }), recordedAt: "2024-05-01T00:00:00.000Z" }] };
     expect((await importLedger(importRequest(backup))).status).toBe(200);
     expect(await prisma.transaction.findUnique({ where: { id: transaction.id } })).toMatchObject({ version: 5 });
     expect((await exportBackup()).transactions[0].version).toBe(5);
@@ -213,10 +215,10 @@ describe("lossless JSON backup restore", () => {
 
   it("round-trips immutable histories and durable creation keys and rejects divergent history", async () => {
     const category = await prisma.category.create({ data: { name: "完整追溯" } });
-    const transaction = await prisma.transaction.create({ data: { type: "EXPENSE", categoryId: category.id, amountCents: 100, occurredOn: monthStart("2024-05"), version: 3 } });
-    await prisma.transactionHistory.create({ data: { transactionId: transaction.id, version: 3, action: "create", after: { id: transaction.id, version: 3, note: "原记录" } } });
-    await prisma.monthlySettlement.create({ data: { month: monthStart("2024-05"), budgetAmountCents: 0, expenseAmountCents: 100, incomeAmountCents: 0, revision: 2, reopenedAt: new Date("2024-05-02T00:00:00.000Z") } });
-    await prisma.settlementHistory.create({ data: { month: monthStart("2024-05"), revision: 2, action: "reopen", snapshot: { month: "2024-05", revision: 2 } } });
+    const transaction = await prisma.transaction.create({ data: { type: "EXPENSE", categoryId: category.id, amountCents: 100, occurredOn: monthStart("2024-05"), version: 3, note: "原记录" } });
+    await prisma.transactionHistory.create({ data: { transactionId: transaction.id, version: 3, action: "create", after: transactionSnapshot(transaction) } });
+    const settlement = await prisma.monthlySettlement.create({ data: { month: monthStart("2024-05"), budgetAmountCents: 0, expenseAmountCents: 100, incomeAmountCents: 0, revision: 2, reopenedAt: new Date("2024-05-02T00:00:00.000Z") } });
+    await prisma.settlementHistory.create({ data: { month: monthStart("2024-05"), revision: 2, action: "reopen", snapshot: serializeSettlement(settlement) } });
     await prisma.creationRequest.create({ data: { key: "durable-key", requestHash: "hash", response: { transaction: { id: transaction.id } } } });
     const backup = await exportBackup();
     await resetDatabase();
