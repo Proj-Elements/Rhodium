@@ -86,6 +86,27 @@ test("UI assets and the license channel retain build verification", () => {
   for (const path of ["app/icon.svg", "public/logo.png", "scripts/ci-licensed.mjs", ".github/workflows/ci.yml"]) assert.equal(scopeFor([path]).licensed, true, path);
   assert.equal(scopeFor(["public/skill/SKILL.md"]).licensed, false);
 });
+test("fonts and public skill changes select their actual asset checks", () => {
+  for (const path of ["public/fonts/dm-sans-regular.ttf", "public/fonts/new.otf"]) {
+    const scope = scopeFor([path]);
+    assert.equal(scope.fontAssets, true);
+    assert.equal(scope.build, true);
+    assert.equal(scope.licensed, true);
+  }
+  const skill = scopeFor(["public/skill/SKILL.md"]);
+  assert.equal(skill.apiDocs, true);
+  assert.equal(skill.database, false);
+  assert.equal(skill.build, false);
+  assert.equal(scopeFor(["app/api/categories/route.ts"]).apiDocs, true);
+  assert.equal(scopeFor(["scripts/ci-assets.mjs"]).selectorTests, true);
+});
+test("server instrumentation receives runtime type, database and build checks", () => {
+  const scope = scopeFor(["instrumentation.ts"]);
+  assert.equal(scope.build, true);
+  assert.equal(scope.typecheck, true);
+  assert.equal(scope.database, true);
+  assert.ok(scope.sources.includes("instrumentation.ts"));
+});
 test("shared dependencies require their consumers' checks even when deleted", () => {
   const dependencies = { frontend: new Set(["lib/shared.ts"]), database: new Set(["lib/server-helper.ts"]) };
   assert.equal(scopeFor(["lib/shared.ts"], () => false, dependencies).licensed, true);
