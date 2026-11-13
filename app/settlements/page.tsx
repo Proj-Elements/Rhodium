@@ -15,6 +15,7 @@ import { isCurrentMonthReady, runClientLoad } from "@/lib/client-load";
 import { formatMoney, monthStart, todayInShanghai } from "@/lib/domain";
 import { useToday } from "@/lib/use-today";
 import { useLedgerRevision } from "@/lib/ledger-events";
+import { SettlementHistory } from "@/components/settlement-history";
 
 type Summary = {
   month: string;
@@ -33,7 +34,7 @@ type Summary = {
   subscriptionExpenseCents: number;
   transactionCount: number;
   expenseTransactionCount: number;
-  settlement: { settledAt: string; reopenedAt: string | null } | null;
+  settlement: { settledAt: string; reopenedAt: string | null; revision: number } | null;
 };
 
 type Status = "past" | "current" | "future";
@@ -95,7 +96,7 @@ function DailyCalendar({ month, days }: { month: string; days: Summary["dailyBre
   );
 }
 
-const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+const MONTH_PATTERN = /^(?!0000)\d{4}-(0[1-9]|1[0-2])$/;
 
 export default function SettlementsPage() {
   const [month, setMonth] = useState("");
@@ -178,7 +179,7 @@ export default function SettlementsPage() {
     if (!canReopen) return;
     setBusy(true);
     try {
-      await apiFetch(`/api/settlements/${month}/reopen`, { method: "POST" });
+      await apiFetch(`/api/settlements/${month}/reopen`, { method: "POST", json: { expectedVersion: summary!.settlement!.revision } });
       flash("本月已重新打开");
       reload();
     } catch (reopenError) {
@@ -239,6 +240,7 @@ export default function SettlementsPage() {
             </div>
 
             <Card className="panel reveal reveal-delay-2"><div className="section-heading"><div><h2 className="section-title">把时间拉长一点</h2><p className="section-description">{trendDescription}</p></div><span className="flex shrink-0 items-center gap-2 text-[11px] text-muted"><i className="size-2 rounded-full bg-accent" />月度支出</span></div><div className="h-[210px] w-full" aria-label="近六个月支出柱状图"><BarChart data={trendChartData} height={210} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}><BarChart.Grid strokeDasharray="3 3" vertical={false} /><BarChart.XAxis dataKey="monthLabel" axisLine={false} tickLine={false} tickMargin={10} /><BarChart.YAxis axisLine={false} tickLine={false} width={52} tickFormatter={(value: number) => `¥${value}`} /><BarChart.Tooltip content={<BarChart.TooltipContent indicator="dot" valueFormatter={(value) => `¥${Number(value).toFixed(2)}`} />} /><BarChart.Bar isAnimationActive={false} dataKey="expenseYuan" name="月度支出" fill="var(--accent)" radius={[6, 6, 0, 0]} maxBarSize={38} /></BarChart></div></Card>
+            <SettlementHistory month={month} />
           </>
         )}
       </div>

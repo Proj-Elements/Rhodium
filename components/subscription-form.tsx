@@ -7,6 +7,7 @@ import { addMonths, todayInShanghai } from "@/lib/domain";
 import { CategoryDTO, SubscriptionDTO } from "@/lib/types";
 import { IconButton } from "@/components/icon-button";
 import { ModalDialog } from "@/components/modal-dialog";
+import { transactionCreationKey, confirmTransactionCreation } from "@/lib/transaction-request";
 
 const fieldClassName = "ledger-field";
 
@@ -75,20 +76,15 @@ export function SubscriptionForm({
     const controller = new AbortController();
     requestRef.current = controller;
     try {
+      const payload = { name, amount, billingDay: Number(billingDay), categoryId, startMonth, endMonth: endMonth || null, active: subscription?.active ?? true, note };
+      const key = subscription ? null : await transactionCreationKey({ resource: "subscription", ...payload });
       await apiFetch(subscription ? `/api/subscriptions/${subscription.id}` : "/api/subscriptions", {
         method: subscription ? "PATCH" : "POST",
         signal: controller.signal,
-        json: {
-          name,
-          amount,
-          billingDay: Number(billingDay),
-          categoryId,
-          startMonth,
-          endMonth: endMonth || null,
-          active: subscription?.active ?? true,
-          note,
-        },
+        headers: key ? { "Idempotency-Key": key } : undefined,
+        json: subscription ? { ...payload, expectedVersion: subscription.version } : payload,
       });
+      if (key) confirmTransactionCreation(key);
       if (mountedRef.current) onSaved();
     } catch (saveError) {
       if (mountedRef.current) setError(errorMessage(saveError, "保存失败，请稍后再试"));

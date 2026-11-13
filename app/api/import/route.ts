@@ -22,7 +22,7 @@ import { recordTransactionHistory, transactionSnapshot } from "@/lib/transaction
 import { recordSettlementHistory } from "@/lib/settlement-history";
 import { withLedgerWrite } from "@/lib/ledger-write";
 import { invalidateSubscriptionSyncCache } from "@/lib/subscriptions";
-import { ensureDefaultCategories } from "@/lib/seed";
+import { indexImportCategories, rememberImportCategory, resolveBackupCategory, resolveImportCategory } from "@/lib/import-categories";
 import { importSchema, type BackupPayload } from "@/lib/backup-validation";
 import { CategoryType, Prisma, TransactionType, type Category } from "@prisma/client";
 
@@ -78,16 +78,18 @@ async function reconcileOccurrenceKeys(tx: Tx, wanted: Map<string, string | null
  */
 async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
   const existingCategories = await tx.category.findMany();
-  const categoryByNameType = new Map(existingCategories.map((category) => [`${category.name}|${category.type}`, category]));
-  const categoryById = new Map(existingCategories.map((category) => [category.id, category]));
+  const categoryIndex = indexImportCategories(existingCategories);
+  const categoryById = categoryIndex.byId;
 
   for (const row of backup.categories ?? []) {
     const name = row.name.trim();
     const type = parseCategoryType(row.type);
-    const existing = categoryByNameType.get(`${name}|${type}`);
+    const existing = resolveBackupCategory(categoryIndex, row);
     if (existing) {
       // Missing legacy fields preserve local metadata; explicit values restore it.
       const metadata = {
+        name,
+        ...(row.systemKey ? { systemKey: row.systemKey, isSystem: true } : {}),
         ...(row.icon !== undefined ? { icon: row.icon } : {}),
         ...(row.sortOrder !== undefined ? { sortOrder: row.sortOrder } : {}),
         ...(row.archivedAt !== undefined ? { archivedAt: optionalDateTime(row.archivedAt, "分类归档时间") } : {}),
@@ -97,9 +99,8 @@ async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
         ...(row.updatedAt ? { updatedAt: new Date(row.updatedAt) } : {}),
       };
       if (Object.keys(metadata).length) {
-        const updated = await tx.category.update({ where: { id: existing.id }, data: metadata });
-        categoryByNameType.set(`${name}|${type}`, updated);
-        categoryById.set(existing.id, updated);
+        const updated = await tx.category.update({ where: { id: existing.id }, data: { ...metadata, version: { increment: 1 } } });
+        rememberImportCategory(categoryIndex, updated);
       }
       idMap.categories.set(row.id, existing.id);
       continue;
@@ -111,9 +112,9 @@ async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
         name,
         type,
         icon: row.icon ?? null,
-        // isSystem is owned by the seed (it gates archiving in the UI), so an
-        // imported category never claims it.
-        isSystem: false,
+        // Only a validated stable seed identity may restore a system category.
+        isSystem: Boolean(row.systemKey),
+        systemKey: row.systemKey ?? null,
         sortOrder: row.sortOrder ?? 0,
         archivedAt: optionalDateTime(row.archivedAt, "分类归档时间"),
         billingPauses: row.billingPauses ?? (row.archivedAt ? [{ start: "0001-01-01", end: null }] : []),
@@ -121,8 +122,7 @@ async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
         ...(row.updatedAt ? { updatedAt: new Date(row.updatedAt) } : {}),
       },
     });
-    categoryByNameType.set(`${name}|${type}`, created);
-    categoryById.set(created.id, created);
+    rememberImportCategory(categoryIndex, created);
     idMap.categories.set(row.id, created.id);
   }
 
@@ -165,7 +165,7 @@ async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
       const saved = await tx.subscription.upsert({
         where: { id: row.id },
         create: { id: row.id, ...data },
-        update: data,
+        update: { ...data, version: { increment: 1 }, syncedThrough: null },
         select: { id: true },
       });
       idMap.subscriptions.set(row.id, saved.id);
@@ -177,7 +177,7 @@ async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
   } else if (backup.budgetPreset !== undefined) {
     const { amountCents, updatedAt } = backup.budgetPreset;
     const data = { amountCents, ...(updatedAt ? { updatedAt: new Date(updatedAt) } : {}) };
-    await tx.budgetPreset.upsert({ where: { id: 1 }, create: { id: 1, ...data }, update: data });
+    await tx.budgetPreset.upsert({ where: { id: 1 }, create: { id: 1, ...data }, update: { ...data, version: { increment: 1 } } });
   }
 
   for (const row of backup.budgets ?? []) {
@@ -185,7 +185,7 @@ async function importBackup(tx: Tx, backup: BackupPayload, idMap: IdMap) {
     if (!month) continue;
     const amountCents = parseCents(row.amountCents, "预算金额");
     const data = { amountCents, ...(row.createdAt ? { createdAt: new Date(row.createdAt) } : {}), ...(row.updatedAt ? { updatedAt: new Date(row.updatedAt) } : {}) };
-    await tx.monthlyBudget.upsert({ where: { month }, create: { month, ...data }, update: data });
+    await tx.monthlyBudget.upsert({ where: { month }, create: { month, ...data }, update: { ...data, version: { increment: 1 } } });
   }
 
 }
@@ -260,21 +260,6 @@ async function importSettlements(tx: Tx, backup: BackupPayload, idMap: IdMap) {
   }
 }
 
-/**
- * Category used when a row names one that does not exist. Prefers the seeded
- * 「其他」 catch-all but degrades to any usable category (and finally creates
- * one) instead of throwing, so a renamed catch-all no longer fails the import.
- */
-async function resolveFallbackCategory(tx: Tx, categories: Category[]): Promise<Category> {
-  const usable = categories.filter((category) => category.archivedAt === null);
-  const existing = usable.find((category) => category.name === "其他" && category.type === CategoryType.BOTH) ?? usable.find((category) => category.type === CategoryType.BOTH);
-  if (existing) return existing;
-  const names = new Set(categories.filter((category) => category.type === CategoryType.BOTH).map((category) => category.name));
-  let suffix = 0;
-  while (names.has(suffix ? `导入未分类 ${suffix}` : "导入未分类")) suffix += 1;
-  return tx.category.create({ data: { name: suffix ? `导入未分类 ${suffix}` : "导入未分类", type: CategoryType.BOTH, sortOrder: 99 } });
-}
-
 /** Full-backup history may reference archived categories; new row imports may not. */
 function usableFor(category: Category | undefined, wanted: CategoryType, allowArchived = false): Category | undefined {
   if (!category || (!allowArchived && category.archivedAt !== null)) return undefined;
@@ -310,15 +295,22 @@ export async function POST(request: Request) {
       const existingRows = [];
       for (const batch of importChunks(externalIds)) existingRows.push(...await tx.transaction.findMany({ where: { id: { in: batch } }, include: { category: { select: { name: true } } } }));
       const existingById = new Map(existingRows.map((row) => [row.id, row]));
-      await ensureDefaultCategories(tx);
       if (body.backup) await importBackup(tx, body.backup, idMap);
-      if (body.backup) await restoreBackupHistory(tx, body.backup);
+      if (body.backup) await restoreBackupHistory(tx, body.backup, false, idMap.categories);
 
       // Preload the whole category list once instead of findFirst per row.
       const categories = await tx.category.findMany();
-      const byId = new Map(categories.map((category) => [category.id, category]));
-      const byNameType = new Map(categories.map((category) => [`${category.name}|${category.type}`, category]));
-      const fallbackCategory = await resolveFallbackCategory(tx, categories);
+      const categoryIndex = indexImportCategories(categories);
+      const byId = categoryIndex.byId;
+      if (!restoringBackup) {
+        for (const row of normalizedRows) {
+          const resolved = resolveImportCategory(categoryIndex, row);
+          if (!resolved.existing) {
+            const created = await tx.category.create({ data: { name: resolved.name, type: row.type } });
+            rememberImportCategory(categoryIndex, created);
+          }
+        }
+      }
 
       // Resolve every referenced subscription in one query (was one per row).
       const referencedSubscriptionIds = [
@@ -339,11 +331,10 @@ export async function POST(request: Request) {
         // turn a reimbursed expense back into budget consumption.
         const reimbursedAt = row.type === TransactionType.EXPENSE ? row.reimbursedAt : null;
         const mappedCategoryId = row.categoryId ? idMap.categories.get(row.categoryId) ?? row.categoryId : null;
-        const category =
-          usableFor(mappedCategoryId ? byId.get(mappedCategoryId) : undefined, wantedType, restoringBackup) ??
-          usableFor(byNameType.get(`${row.categoryName}|${wantedType}`), wantedType) ??
-          usableFor(byNameType.get(`${row.categoryName}|${CategoryType.BOTH}`), wantedType) ??
-          fallbackCategory;
+        const category = restoringBackup
+          ? usableFor(mappedCategoryId ? byId.get(mappedCategoryId) : undefined, wantedType, true)
+          : resolveImportCategory(categoryIndex, row).existing;
+        if (!category) throw conflict("导入分类不存在或不支持该收支类型");
         if (restoringBackup && (!mappedCategoryId || !usableFor(byId.get(mappedCategoryId), wantedType, true))) {
           throw conflict(`备份账目 ${row.externalId ?? ""} 的分类不存在或收支类型不匹配`);
         }

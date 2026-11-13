@@ -14,6 +14,7 @@ export type ImportSummary = {
   categories: { create: number; update: number };
   subscriptions: { create: number; update: number };
   budgets: { create: number; update: number };
+  budgetPreset: { create: number; update: number; delete: number };
   settlements: { create: number; update: number };
   lockedMonths: string[];
   conflicts: string[];
@@ -57,7 +58,7 @@ export function createImportPreviewController(
         if (format === "json") {
           const data = JSON.parse(text) as Record<string, unknown>;
           if (typeof data !== "object" || data === null || Array.isArray(data)) throw new Error("JSON 文件必须是账目或完整备份对象");
-          backup = "version" in data || "categories" in data || "subscriptions" in data || "settlements" in data ? data : undefined;
+          backup = ["version", "categories", "subscriptions", "settlements", "budgets", "budgetPreset", "transactionHistory", "settlementHistory", "creationRequests"].some((key) => key in data) ? data : undefined;
           const rawRows = data.transactions ?? data.rows ?? [];
           if (!Array.isArray(rawRows) || rawRows.some((row) => typeof row !== "object" || row === null || Array.isArray(row))) {
             throw new Error("账目必须是对象数组，文件中存在无法导入的记录");

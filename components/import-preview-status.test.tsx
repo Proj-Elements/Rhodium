@@ -42,11 +42,22 @@ describe("import preview feedback", () => {
     const counts = { create: 0, update: 0 };
     const markup = render({ ...ready, selection: { ...ready.selection, preview: { total: 0, valid: 0, errors: [], summary: {
       transactions: { ...counts, unchanged: 0 }, categories: counts, subscriptions: counts, budgets: counts, settlements: counts,
+      budgetPreset: { create: 0, update: 0, delete: 0 },
       lockedMonths: ["2026-10"], conflicts: ["结算与目标账目不一致"],
     } } } });
     expect(markup).toContain("结算与目标账目不一致");
     expect(markup).toContain("2026-10");
     expect(markup).not.toContain("文件检查通过");
     expect(markup).not.toContain("确认导入");
+  });
+
+  it("shows removal of the default budget before asking to import an empty backup", () => {
+    const counts = { create: 0, update: 0 };
+    const markup = render({ ...ready, selection: { ...ready.selection, preview: { total: 0, valid: 0, errors: [], summary: {
+      transactions: { ...counts, unchanged: 0 }, categories: counts, subscriptions: counts, budgets: counts, settlements: counts,
+      budgetPreset: { create: 0, update: 0, delete: 1 }, lockedMonths: [], conflicts: [],
+    } } } });
+    expect(markup).toContain("默认预算：新增 0，修改 0，删除 1");
+    expect(markup).toContain("确认导入");
   });
 });

@@ -31,7 +31,7 @@ type TransactionSummary = { expenseCents: number; outOfPocketCents: number; inco
 type TransactionsPayload = { month: string; readOnly: boolean; transactions: LedgerTransaction[]; nextCursor: string | null; summary: TransactionSummary };
 type HistoryEntry = { id: string; version: number; action: string; recordedAt: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null };
 
-const MONTH_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
+const MONTH_PATTERN = /^(?!0000)\d{4}-(0[1-9]|1[0-2])$/;
 const HISTORY_FIELDS = [
   ["type", "收支类型"], ["amountCents", "金额"], ["occurredOn", "发生日期"], ["categoryName", "分类"],
   ["note", "备注"], ["reimbursedAt", "报销时间"], ["deletedAt", "删除时间"], ["source", "来源"],
@@ -79,6 +79,8 @@ export default function TransactionsPage() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
   const [historyReload, setHistoryReload] = useState(0);
+  const [historyCursor, setHistoryCursor] = useState<number | null>(null);
+  const historyMoreRequest = useRef<AbortController | null>(null);
   const deepLinkHandled = useRef(false);
   const pendingNewIntent = useRef(false);
   const moreRequest = useRef<AbortController | null>(null);
@@ -191,16 +193,33 @@ export default function TransactionsPage() {
     setHistoryLoading(true);
     setHistoryError("");
     setHistory([]);
+    setHistoryCursor(null);
     void runClientLoad({
       signal: controller.signal,
-      work: () => apiFetch<{ history: HistoryEntry[] }>(`/api/transactions/${historyTransaction.id}/history`, { signal: controller.signal }),
-      success: (result) => setHistory(result.history),
+      work: () => apiFetch<{ history: HistoryEntry[]; nextCursor: number | null }>(`/api/transactions/${historyTransaction.id}/history`, { signal: controller.signal }),
+      success: (result) => { setHistory(result.history); setHistoryCursor(result.nextCursor); },
       failure: setHistoryError,
       finished: () => setHistoryLoading(false),
       fallback: "无法读取变更历史",
     });
-    return () => controller.abort();
-  }, [historyTransaction, historyReload]);
+    return () => { controller.abort(); historyMoreRequest.current?.abort(); historyMoreRequest.current = null; };
+  }, [historyTransaction, historyReload, ledgerRevision]);
+
+  async function loadMoreHistory() {
+    if (!historyTransaction || !historyCursor || historyLoading || historyMoreRequest.current) return;
+    const id = historyTransaction.id;
+    const controller = new AbortController();
+    historyMoreRequest.current = controller;
+    setHistoryLoading(true);
+    setHistoryError("");
+    try {
+      const page = await apiFetch<{ history: HistoryEntry[]; nextCursor: number | null }>(`/api/transactions/${id}/history?cursor=${historyCursor}`, { signal: controller.signal });
+      if (controller.signal.aborted) return;
+      setHistory((items) => [...items, ...page.history.filter((entry) => !items.some((item) => item.id === entry.id))]);
+      setHistoryCursor(page.nextCursor);
+    } catch (failure) { if (!controller.signal.aborted) setHistoryError(errorMessage(failure, "无法读取更多历史")); }
+    finally { if (historyMoreRequest.current === controller) historyMoreRequest.current = null; if (!controller.signal.aborted) setHistoryLoading(false); }
+  }
 
   async function loadMore() {
     if (!ready || !nextCursor || loadingMore) return;
@@ -359,7 +378,9 @@ export default function TransactionsPage() {
       {pendingDelete && ready && writable(pendingDelete) && view === "ledger" && <ConfirmDialog title="删除这笔记录？" description={`「${pendingDelete.note || pendingDelete.category.name}」将移入回收站，不再计入账本统计。以后仍可在回收站按月份或关键词查找并恢复。`} confirmLabel="移入回收站" danger busy={Boolean(deletingId)} onConfirm={() => void remove(pendingDelete)} onClose={() => setPendingDelete(null)} />}
       {historyTransaction && <ModalDialog labelledBy="transaction-history-title" onClose={() => setHistoryTransaction(null)} onSubmit={(event) => event.preventDefault()} wide header={<div className="flex items-center justify-between gap-3"><h2 id="transaction-history-title" className="text-lg font-semibold">账目变更历史</h2><IconButton icon="close" label="关闭变更历史" onPress={() => setHistoryTransaction(null)} /></div>} footer={<Button type="button" variant="ghost" onPress={() => setHistoryTransaction(null)}>关闭</Button>}>
         <p className="text-sm text-muted">{historyTransaction.note || historyTransaction.category.name} · {historyTransaction.occurredOn}</p>
-        {historyLoading ? <p role="status" className="text-sm text-muted">正在读取变更记录…</p> : historyError ? <><p className="form-error" role="alert">{historyError}</p><Button type="button" variant="outline" onPress={() => setHistoryReload((value) => value + 1)}>重新加载</Button></> : !history.length ? <p className="text-sm leading-7 text-muted">这笔账目尚无记录的变更。历史功能启用前的修改无法追溯。</p> : <ol className="flex flex-col gap-5">{history.map((entry) => <li key={entry.id} className="rounded-xl bg-surface-secondary p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs"><strong>{HISTORY_ACTIONS[entry.action.toUpperCase()] || entry.action} · 版本 {entry.version}</strong><time className="text-muted tabular-nums" dateTime={entry.recordedAt}>{historyValue("recordedAt", entry.recordedAt)}</time></div><dl className="flex flex-col gap-2 text-xs">{HISTORY_FIELDS.filter(([field]) => entry.before?.[field] !== entry.after?.[field] && (entry.before?.[field] != null || entry.after?.[field] != null)).map(([field, label]) => <div key={field} className="grid grid-cols-[5em_1fr] gap-3"><dt className="text-muted">{label}</dt><dd className="min-w-0 break-words whitespace-pre-wrap">{entry.before ? <><span className="text-muted">{historyValue(field, entry.before[field])}</span><span aria-label="变为" className="mx-2">→</span></> : null}{historyValue(field, entry.after?.[field])}</dd></div>)}</dl></li>)}</ol>}
+        {historyLoading && !history.length ? <p role="status" className="text-sm text-muted">正在读取变更记录…</p> : historyError && !history.length ? <><p className="form-error" role="alert">{historyError}</p><Button type="button" variant="outline" onPress={() => setHistoryReload((value) => value + 1)}>重新加载</Button></> : !history.length ? <p className="text-sm leading-7 text-muted">这笔账目尚无记录的变更。历史功能启用前的修改无法追溯。</p> : <ol className="flex flex-col gap-5">{history.map((entry) => <li key={entry.id} className="rounded-xl bg-surface-secondary p-4"><div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs"><strong>{HISTORY_ACTIONS[entry.action.toUpperCase()] || entry.action} · 版本 {entry.version}</strong><time className="text-muted tabular-nums" dateTime={entry.recordedAt}>{historyValue("recordedAt", entry.recordedAt)}</time></div><dl className="flex flex-col gap-2 text-xs">{HISTORY_FIELDS.filter(([field]) => entry.before?.[field] !== entry.after?.[field] && (entry.before?.[field] != null || entry.after?.[field] != null)).map(([field, label]) => <div key={field} className="grid grid-cols-[5em_1fr] gap-3"><dt className="text-muted">{label}</dt><dd className="min-w-0 break-words whitespace-pre-wrap">{entry.before ? <><span className="text-muted">{historyValue(field, entry.before[field])}</span><span aria-label="变为" className="mx-2">→</span></> : null}{historyValue(field, entry.after?.[field])}</dd></div>)}</dl></li>)}</ol>}
+        {history.length > 0 && historyError && <p className="form-error" role="alert">{historyError}</p>}
+        {historyCursor && <Button type="button" variant="outline" isPending={historyLoading} onPress={() => void loadMoreHistory()}>加载更早历史</Button>}
       </ModalDialog>}
       {undoTransaction && !message && <Toast message="记录已移入回收站，之后仍可恢复" action={restoringId ? "正在恢复" : "撤销"} onAction={() => { if (!restoringId) void restore(undoTransaction); }} />}
       {message && <Toast message={message} />}

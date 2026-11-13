@@ -18,6 +18,7 @@ import { SettingsDataBoundary } from "@/components/settings-data-boundary";
 import { ImportPreviewStatus } from "@/components/import-preview-status";
 import { categoryIconLabels, categoryIconNames, isCategoryIconName, type CategoryIconName } from "@/lib/category-icons";
 import { CategoryDTO } from "@/lib/types";
+import { useLedgerRevision } from "@/lib/ledger-events";
 
 const fieldClassName = "ledger-field";
 
@@ -50,6 +51,8 @@ export default function SettingsPage() {
   const [currentMonthSource, setCurrentMonthSource] = useState<"month" | "preset" | "settlement" | "none">("none");
   const [currentMonthReadOnly, setCurrentMonthReadOnly] = useState(false);
   const [budgetSaving, setBudgetSaving] = useState(false);
+  const [budgetVersions, setBudgetVersions] = useState({ month: "", future: "", preset: "" });
+  const ledgerRevision = useLedgerRevision();
 
   const today = useToday();
   const currentMonth = today?.slice(0, 7) ?? "";
@@ -74,6 +77,9 @@ export default function SettingsPage() {
           effectiveBudgetCents: number | null;
           source: "month" | "preset" | "settlement" | "none";
           locked: boolean;
+          version: string;
+          futureVersion: string;
+          presetVersion: string;
         }>(`/api/budgets/${requestedMonth}`, { signal: controller.signal }),
       ]),
       success: ([categoryResult, budgetResult]) => {
@@ -82,6 +88,7 @@ export default function SettingsPage() {
         setEffectiveBudgetCents(budgetResult.effectiveBudgetCents ?? null);
         setCurrentMonthSource(budgetResult.source);
         setCurrentMonthReadOnly(budgetResult.locked);
+        setBudgetVersions({ month: budgetResult.version, future: budgetResult.futureVersion, preset: budgetResult.presetVersion });
         setLoadedMonth(requestedMonth);
       },
       failure: setLoadError,
@@ -95,7 +102,7 @@ export default function SettingsPage() {
     setConfirmFuture(false);
     void load();
     return () => { loadController.current?.abort(); };
-  }, [currentMonth, load]);
+  }, [currentMonth, load, ledgerRevision]);
 
   useEffect(() => () => importController.dispose(), [importController]);
 
@@ -135,7 +142,7 @@ export default function SettingsPage() {
     try {
       await apiFetch(`/api/categories/${category.id}`, {
         method: "PATCH",
-        json: { archived: !category.archivedAt },
+        json: { archived: !category.archivedAt, expectedVersion: category.version },
       });
       flash(category.archivedAt ? "分类已重新启用" : "分类已停用");
       await load();
@@ -178,7 +185,7 @@ export default function SettingsPage() {
     try {
       await apiFetch("/api/budgets/preset", {
         method: "PUT",
-        json: { amount: presetInput },
+        json: { amount: presetInput, expectedVersion: budgetVersions.preset },
       });
       setPresetInput("");
       flash("默认预算已保存，之后每个月都会沿用");
@@ -200,12 +207,13 @@ export default function SettingsPage() {
     try {
       const result = await apiFetch<{ budget: { amountCents: number } }>(
         `/api/budgets/${currentMonth}`,
-        { method: "PUT", json: { amount: monthBudgetInput } },
+        { method: "PUT", json: { amount: monthBudgetInput, expectedVersion: budgetVersions.month } },
       );
       setEffectiveBudgetCents(result.budget.amountCents);
       setCurrentMonthSource("month");
       setMonthBudgetInput("");
       flash("本月预算已单独调整");
+      await load();
     } catch (saveError) {
       flash(errorMessage(saveError, "本月预算保存失败"));
     } finally {
@@ -223,13 +231,14 @@ export default function SettingsPage() {
     try {
       const result = await apiFetch<{ budget: { amountCents: number } }>(
         `/api/budgets/${currentMonth}?scope=future`,
-        { method: "PUT", json: { amount: futureBudgetInput } },
+        { method: "PUT", json: { amount: futureBudgetInput, expectedVersion: budgetVersions.future } },
       );
       setEffectiveBudgetCents(result.budget.amountCents);
       setCurrentMonthSource("month");
       setFutureBudgetInput("");
       setConfirmFuture(false);
       flash("本月及以后每个月的预算已更新");
+      await load();
     } catch (saveError) {
       flash(errorMessage(saveError, "预算保存失败"));
     } finally {
@@ -331,6 +340,7 @@ export default function SettingsPage() {
               <h3 className="font-medium">{previewSummary ? "预计变更" : `导入完成，已处理 ${importResult?.imported ?? 0} 条账目`}</h3>
               <dl className="mt-3 space-y-2 text-[11px] tabular-nums">
                 <div className="flex justify-between gap-3"><dt className="text-muted">账目</dt><dd>新增 {displayedImportSummary.transactions.create} · 覆盖 {displayedImportSummary.transactions.update} · 不变 {displayedImportSummary.transactions.unchanged}</dd></div>
+                <div className="flex justify-between gap-3"><dt className="text-muted">默认预算</dt><dd>新增 {displayedImportSummary.budgetPreset.create} · 修改 {displayedImportSummary.budgetPreset.update} · 删除 {displayedImportSummary.budgetPreset.delete}</dd></div>
                 {([
                   ["分类", displayedImportSummary.categories],
                   ["订阅", displayedImportSummary.subscriptions],
