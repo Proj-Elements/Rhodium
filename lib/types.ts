@@ -1,5 +1,6 @@
 export type CategoryDTO = {
   id: string;
+  version: number;
   name: string;
   type: "EXPENSE" | "INCOME" | "BOTH";
   icon: string | null;
@@ -60,6 +61,7 @@ export type DashboardDTO = {
 
 export type SubscriptionDTO = {
   id: string;
+  version: number;
   name: string;
   amountCents: number;
   billingDay: number;

@@ -29,6 +29,8 @@ model Category {
   type          CategoryType   @default(EXPENSE)
   icon          String?
   isSystem      Boolean        @default(false)
+  systemKey     String?        @unique
+  version       Int            @default(1)
   sortOrder     Int            @default(0)
   archivedAt    DateTime?
   billingPauses Json           @default("[]")
@@ -73,6 +75,8 @@ model Transaction {
 
 model Subscription {
   id           String        @id @default(cuid())
+  version      Int           @default(1)
+  syncedThrough DateTime?    @db.Date
   name         String
   amountCents  Int
   billingDay   Int
@@ -93,6 +97,7 @@ model Subscription {
 
 model MonthlyBudget {
   id          String   @id @default(cuid())
+  version     Int      @default(1)
   month       DateTime @unique @db.Date
   amountCents Int
   createdAt   DateTime @default(now())
@@ -103,6 +108,7 @@ model MonthlyBudget {
 /// explicit MonthlyBudget row. id is always 1.
 model BudgetPreset {
   id          Int      @id @default(1)
+  version     Int      @default(1)
   amountCents Int
   updatedAt   DateTime @updatedAt
 }

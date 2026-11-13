@@ -18,6 +18,7 @@ export function effectiveExpenseCents(transaction: { type: string; amountCents: 
 /** Structural shape of the category fields the DTO needs (Prisma row or a narrowed select). */
 export type CategoryLike = {
   id: string;
+  version?: number;
   name: string;
   type: Category["type"];
   icon: string | null;
@@ -56,6 +57,7 @@ export function serializeTransaction(transaction: TransactionWithRelations): Tra
 export function serializeCategory(category: CategoryLike): CategoryDTO {
   return {
     id: category.id,
+    version: category.version ?? 1,
     name: category.name,
     type: category.type,
     icon: category.icon,

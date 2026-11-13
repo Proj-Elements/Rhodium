@@ -10,6 +10,7 @@ const subscriptionInclude = { category: true } as const;
 
 type SubscriptionWithCategory = {
   id: string;
+  version?: number;
   name: string;
   amountCents: number;
   billingDay: number;
@@ -37,6 +38,7 @@ export function serializeSubscription(subscription: SubscriptionWithCategory, to
     : currentCategory;
   return {
     id: subscription.id,
+    version: subscription.version ?? 1,
     name: subscription.name,
     amountCents: subscription.amountCents,
     billingDay: subscription.billingDay,

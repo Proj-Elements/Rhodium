@@ -29,7 +29,7 @@ export type BillingCandidate = {
  * `referenceDate`? Used by the batched sync; unit-tested for billing-day
  * clamping, start/end windows, and already-passed filtering.
  */
-export function* iterateBillingCandidates(subscriptions: SubscriptionPlanInput[], referenceDate: string): Generator<BillingCandidate> {
+export function* iterateBillingCandidates(subscriptions: SubscriptionPlanInput[], referenceDate: string, window: { fromMonth?: string; throughMonth?: string } = {}): Generator<BillingCandidate> {
   const currentDate = parseDateOnly(referenceDate);
   const currentMonth = referenceDate.slice(0, 7);
 
@@ -42,8 +42,10 @@ export function* iterateBillingCandidates(subscriptions: SubscriptionPlanInput[]
     for (let index = 0; index < history.length; index += 1) {
       const plan = history[index];
       let cursor = plan.effectiveMonth > plan.startMonth ? plan.effectiveMonth : plan.startMonth;
+      if (window.fromMonth && cursor < window.fromMonth) cursor = window.fromMonth;
       const nextEffectiveMonth = history[index + 1]?.effectiveMonth;
       let lastMonth = plan.endMonth && plan.endMonth < currentMonth ? plan.endMonth : currentMonth;
+      if (window.throughMonth && window.throughMonth < lastMonth) lastMonth = window.throughMonth;
       if (nextEffectiveMonth && nextEffectiveMonth <= lastMonth) lastMonth = addMonths(nextEffectiveMonth, -1);
       while (cursor <= lastMonth) {
         const dueDate = billingDate(cursor, plan.billingDay);

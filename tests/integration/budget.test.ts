@@ -12,11 +12,13 @@ import { addTransaction, createCategory, prisma, resetDatabase, routeContext } f
 
 const MONTH = "2024-03";
 
-function putRequest(url: string, amount: string) {
+async function putRequest(url: string, amount: string) {
+  const month = new URL(url).pathname.split("/").at(-1)!;
+  const version = await (await getBudget(new Request(url), routeContext({ month }))).json();
   return new Request(url, {
     method: "PUT",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ amount }),
+    body: JSON.stringify({ amount, expectedVersion: new URL(url).searchParams.get("scope") === "future" ? version.futureVersion : version.version }),
   });
 }
 
@@ -206,7 +208,7 @@ describe("PUT /api/budgets/[month]?scope=future", () => {
       ],
     });
 
-    const response = await putBudget(putRequest("http://localhost/api/budgets/2030-01?scope=future", "1500"), routeContext({ month: "2030-01" }));
+    const response = await putBudget(await putRequest("http://localhost/api/budgets/2030-01?scope=future", "1500"), routeContext({ month: "2030-01" }));
     const payload = (await response.json()) as { budget: { amountCents: number }; monthsSet: number };
 
     expect(response.status).toBe(200);
@@ -228,12 +230,12 @@ describe("PUT /api/budgets/[month]?scope=future", () => {
   });
 
   it("returns the parsed amount the client should display", async () => {
-    const response = await putBudget(putRequest("http://localhost/api/budgets/2030-02", "1,234.56"), routeContext({ month: "2030-02" }));
+    const response = await putBudget(await putRequest("http://localhost/api/budgets/2030-02", "1,234.56"), routeContext({ month: "2030-02" }));
     const payload = (await response.json()) as { budget: { amountCents: number }; scope: string };
 
-    expect(payload).toEqual({ budget: { amountCents: 123_456 }, scope: "month" });
+    expect(payload).toMatchObject({ budget: { amountCents: 123_456 }, scope: "month" });
 
     const read = await getBudget(new Request("http://localhost/api/budgets/2030-02"), routeContext({ month: "2030-02" }));
-    expect(await read.json()).toEqual({ budget: { amountCents: 123_456 }, preset: null, effectiveBudgetCents: 123_456, source: "month", locked: false });
+    expect(await read.json()).toMatchObject({ budget: { amountCents: 123_456 }, preset: null, effectiveBudgetCents: 123_456, source: "month", locked: false });
   });
 });

@@ -1,17 +1,19 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { conflict } from "@/lib/errors";
 
 export type LedgerTransaction = Prisma.TransactionClient;
 export type LedgerWriteOptions = { maxWait?: number; timeout?: number };
 
 /** Read related ledger values from one stable PostgreSQL snapshot. */
-export function withLedgerRead<T>(work: (tx: LedgerTransaction) => Promise<T>): Promise<T> {
+export function withLedgerRead<T>(work: (tx: LedgerTransaction) => Promise<T>, options: LedgerWriteOptions = {}): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SET TRANSACTION READ ONLY`;
     return work(tx);
   }, {
     maxWait: 15_000,
     timeout: 30_000,
+    ...options,
     isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
   });
 }
@@ -34,9 +36,13 @@ export function withLedgerWrite<T>(
   return prisma.$transaction(async (tx) => {
     // Fixed application namespace + ledger id. Project an integer because the
     // lock function returns PostgreSQL void, which Prisma cannot deserialize.
-    await tx.$queryRaw<Array<{ locked: number }>>`
-      SELECT 1 AS locked FROM pg_advisory_xact_lock(1919447405, 1)
-    `;
+    await tx.$executeRaw`SET LOCAL lock_timeout = '3s'`;
+    try {
+      await tx.$queryRaw<Array<{ locked: number }>>`SELECT 1 AS locked FROM pg_advisory_xact_lock(1919447405, 1)`;
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "P2010" && "meta" in error && (error.meta as { code?: string })?.code === "55P03") throw conflict("账本正在处理其他写入，请稍后重试");
+      throw error;
+    }
     return work(tx);
   }, {
     maxWait: 15_000,

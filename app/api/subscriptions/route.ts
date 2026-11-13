@@ -7,6 +7,7 @@ import { assertExpenseCategory, invalidateSubscriptionSyncCache, subscriptionDat
 import { serializeSubscriptions, subscriptionInclude } from "@/lib/subscription-serializer";
 import { initialBillingHistory } from "@/lib/billing-history";
 import { Prisma } from "@prisma/client";
+import { creationIdentity, replayCreation } from "@/lib/idempotency";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,10 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = subscriptionSchema.parse(await parseJsonBody(request));
-    const subscription = await withLedgerWrite(async (tx) => {
+    const identity = creationIdentity(request, "subscription", subscriptionData(body));
+    const result = await withLedgerWrite(async (tx) => {
+      const replay = await replayCreation(tx, identity);
+      if (replay) return { response: replay, replayed: true };
       await assertExpenseCategory(body.categoryId, tx);
       const data = subscriptionData(body);
       const created = await tx.subscription.create({
@@ -36,11 +40,13 @@ export async function POST(request: Request) {
         },
         include: subscriptionInclude,
       });
-      await syncSubscriptions(undefined, tx);
-      return (await serializeSubscriptions([created], tx))[0];
+      await syncSubscriptions(undefined, tx, { subscriptionIds: [created.id] });
+      const response = { subscription: (await serializeSubscriptions([created], tx))[0] };
+      if (identity.key) await tx.creationRequest.create({ data: { ...identity, key: identity.key, response: response as unknown as Prisma.InputJsonObject } });
+      return { response, replayed: false };
     });
     invalidateSubscriptionSyncCache();
-    return NextResponse.json({ subscription }, { status: 201 });
+    return NextResponse.json(result.response, { status: 201, headers: { "Idempotent-Replay": String(result.replayed) } });
   } catch (error) {
     return handleApiError(error);
   }

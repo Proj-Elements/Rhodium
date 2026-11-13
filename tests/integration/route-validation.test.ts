@@ -207,7 +207,7 @@ describe("subscription category validation", () => {
       ...subscriptionData, billingHistory: initialBillingHistory(subscriptionPlanData(subscriptionData)),
     } });
     const response = await patchSubscription(
-      jsonRequest(`http://localhost/api/subscriptions/${subscription.id}`, "PATCH", payload(income.id)),
+      jsonRequest(`http://localhost/api/subscriptions/${subscription.id}`, "PATCH", { ...payload(income.id), expectedVersion: subscription.version }),
       routeContext({ id: subscription.id }),
     );
     expect(response.status).toBe(400);

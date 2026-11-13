@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addMonths, billingDate, calculateRemaining, calculateUsage, daysInMonth, moneyToCents, parseDateOnly, parseMonth } from "@/lib/domain";
+import { addMonths, billingDate, calculateRemaining, calculateUsage, daysInMonth, moneyToCents, monthEnd, parseDateOnly, parseMonth } from "@/lib/domain";
 
 describe("domain money and budget rules", () => {
   it("converts yuan to integer cents without floating point drift", () => {
@@ -51,6 +51,15 @@ describe("domain money and budget rules", () => {
 });
 
 describe("month boundaries", () => {
+  it("supports both advertised year boundaries and rejects year zero", () => {
+    expect(parseMonth("0001-01").toISOString()).toBe("0001-01-01T00:00:00.000Z");
+    expect(monthEnd("9999-12").toISOString()).toBe("9999-12-31T00:00:00.000Z");
+    expect(daysInMonth("9999-12")).toBe(31);
+    expect(() => parseMonth("0000-01")).toThrow();
+    expect(() => parseDateOnly("0000-01-01")).toThrow();
+    expect(() => addMonths("0001-01", -1)).toThrow();
+    expect(() => addMonths("9999-12", 1)).toThrow();
+  });
   it("handles month rollover and leap years", () => {
     expect(addMonths("2024-12", 1)).toBe("2025-01");
     expect(daysInMonth("2024-02")).toBe(29);

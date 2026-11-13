@@ -5,6 +5,8 @@ import type { Category, Transaction } from "@prisma/client";
 
 const category: Category = {
   id: "cat_1",
+  version: 1,
+  systemKey: null,
   name: "餐饮",
   type: "EXPENSE",
   icon: null,
@@ -90,6 +92,7 @@ describe("serializeCategory", () => {
   it("omits timestamps and reports a null archivedAt", () => {
     expect(serializeCategory(category)).toEqual({
       id: "cat_1",
+      version: 1,
       name: "餐饮",
       type: "EXPENSE",
       icon: null,
@@ -200,6 +203,7 @@ describe("serializeSubscription", () => {
     // bookkeeping columns or category timestamps into the client payload.
     expect(serializeSubscription(subscription)).toEqual({
       id: "sub_1",
+      version: 1,
       name: "视频会员",
       amountCents: 2500,
       billingDay: 8,

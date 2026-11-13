@@ -1,6 +1,6 @@
 import { TransactionType, type Prisma } from "@prisma/client";
 import { withLedgerWrite } from "@/lib/ledger-write";
-import { dateOnlyKey, moneyToCents, monthStart, todayInShanghai } from "@/lib/domain";
+import { addMonths, dateOnlyKey, moneyToCents, monthEnd, monthStart, parseDateOnly, todayInShanghai } from "@/lib/domain";
 import { badRequest, conflict } from "@/lib/errors";
 import { iterateBillingCandidates, type BillingCandidate } from "@/lib/subscription-planner";
 import { parseBillingHistory, type BillingPlanData } from "@/lib/billing-history";
@@ -61,22 +61,24 @@ export function subscriptionPlanData(subscription: {
 /** Run the real sync at most once in this window; other callers reuse the result. */
 const SYNC_COOLDOWN_MS = 60_000;
 
-type SyncResult = {
+export type SyncResult = {
   created: number;
   syncedThrough: string;
   skippedUnknownHistory: number;
   historyWarnings: { subscriptionId: string; knownFrom: string | null }[];
 };
 
+type SyncScope = { subscriptionIds?: string[]; month?: string; fromMonth?: string; throughMonth?: string };
+
 let syncGeneration = 0;
 let lastSync: { at: number; referenceDate: string; result: SyncResult } | null = null;
 let inFlight: { referenceDate: string; promise: Promise<SyncResult> } | null = null;
 
 /**
- * Stream planned occurrences in batches of 500 under one ledger transaction.
- * Each batch reads its categories, lock states and existing occurrence keys,
- * then writes missing charges and their audit history together. The lock cache
- * retains only the preceding batch's months; no full candidate list is held.
+ * Background/manual runs commit at most 12 months of one subscription per
+ * ledger transaction and persist their progress. Each occurrence and its audit
+ * entry commit together; failed runs resume from the last successful batch.
+ * Calls with an existing transaction remain atomic with the enclosing mutation.
  *
  * Two layers of call reduction:
  *  - a successful run is cached for the cooldown window, so back-to-back
@@ -85,17 +87,19 @@ let inFlight: { referenceDate: string; promise: Promise<SyncResult> } | null = n
  * A failed run is never cached, and the shared promise is dropped so one
  * failure cannot poison later callers.
  */
-export function syncSubscriptions(referenceDate = todayInShanghai(), tx?: Prisma.TransactionClient): Promise<SyncResult> {
+export function syncSubscriptions(referenceDate = todayInShanghai(), tx?: Prisma.TransactionClient, scope: SyncScope = {}): Promise<SyncResult> {
+  parseDateOnly(referenceDate);
   // A caller already holding the ledger lock must see its uncommitted mutation
   // and must never join a cached/in-flight run on a different connection.
-  if (tx) return runSync(referenceDate, tx).catch(syncError);
+  if (tx) return runSync(referenceDate, tx, scope).catch(syncError);
+  if (Object.keys(scope).length) return withLedgerWrite((db) => runSync(referenceDate, db, scope)).catch(syncError);
   if (lastSync && lastSync.referenceDate === referenceDate && Date.now() - lastSync.at < SYNC_COOLDOWN_MS) {
     return Promise.resolve(lastSync.result);
   }
   if (inFlight && inFlight.referenceDate === referenceDate) return inFlight.promise;
 
   const generation = syncGeneration;
-  const promise = withLedgerWrite((db) => runSync(referenceDate, db))
+  const promise = runBatchedSync(referenceDate)
     .then((result) => {
       if (generation === syncGeneration) lastSync = { at: Date.now(), referenceDate, result };
       return result;
@@ -108,9 +112,55 @@ export function syncSubscriptions(referenceDate = todayInShanghai(), tx?: Prisma
   return promise;
 }
 
+async function runBatchedSync(referenceDate: string): Promise<SyncResult> {
+  const result: SyncResult = { created: 0, syncedThrough: referenceDate, skippedUnknownHistory: 0, historyWarnings: [] };
+  const currentMonth = referenceDate.slice(0, 7);
+  // Snapshot only the identities before writing. A keyset scan can skip a new
+  // subscription inserted behind its cursor; those creates are synced by their
+  // own route, while this snapshot guarantees every pre-existing plan is seen.
+  const subscriptionIds = (await prisma.subscription.findMany({
+    select: { id: true },
+    orderBy: { id: "asc" },
+  })).map((subscription) => subscription.id);
+  for (let offset = 0; offset < subscriptionIds.length; offset += 100) {
+    const batch = subscriptionIds.slice(offset, offset + 100);
+    for (const subscriptionId of batch) {
+      let done = false;
+      let reported = false;
+      while (!done) {
+        const step = await withLedgerWrite(async (tx) => {
+          const existing = await tx.subscription.findUnique({ where: { id: subscriptionId } });
+          if (!existing) return null;
+          const knownFrom = parseBillingHistory(existing.billingHistory)[0]?.effectiveMonth;
+          let fromMonth = knownFrom && knownFrom > monthKeyOf(existing.startMonth) ? knownFrom : monthKeyOf(existing.startMonth);
+          if (existing.syncedThrough) {
+            const previousMonth = monthKeyOf(existing.syncedThrough);
+            fromMonth = dateOnlyKey(existing.syncedThrough) === dateOnlyKey(monthEnd(previousMonth)) && previousMonth < currentMonth ? addMonths(previousMonth, 1) : previousMonth;
+          }
+          if (fromMonth > currentMonth || !knownFrom) fromMonth = currentMonth;
+          const monthsLeft = (Number(currentMonth.slice(0, 4)) - Number(fromMonth.slice(0, 4))) * 12 + Number(currentMonth.slice(5, 7)) - Number(fromMonth.slice(5, 7));
+          const throughMonth = addMonths(fromMonth, Math.min(11, monthsLeft));
+          const synced = await runSync(referenceDate, tx, { subscriptionIds: [subscriptionId], fromMonth, throughMonth });
+          await tx.subscription.update({ where: { id: subscriptionId }, data: { syncedThrough: throughMonth === currentMonth ? new Date(`${referenceDate}T00:00:00.000Z`) : monthEnd(throughMonth) } });
+          return { synced, done: throughMonth === currentMonth };
+        }, { timeout: 15_000 });
+        if (!step) break;
+        done = step.done;
+        result.created += step.synced.created;
+        if (!reported) {
+          result.historyWarnings.push(...step.synced.historyWarnings);
+          reported = true;
+        }
+      }
+    }
+  }
+  result.skippedUnknownHistory = result.historyWarnings.length;
+  return result;
+}
+
 function syncError(error: unknown): never {
   if (error && typeof error === "object" && "code" in error && error.code === "P2028") {
-    throw conflict("固定支出同步超时，全部更改已回滚。请缩短新订阅的自动补记区间，较早账目可通过导入恢复");
+    throw conflict("固定支出同步超时，当前批次已回滚；已完成的批次会保留。请读取账本核对，稍后重试将继续补记");
   }
   throw error;
 }
@@ -133,8 +183,9 @@ export function resetSubscriptionSyncCache() {
   invalidateSubscriptionSyncCache();
 }
 
-async function runSync(referenceDate: string, prisma: Prisma.TransactionClient) {
+async function runSync(referenceDate: string, prisma: Prisma.TransactionClient, scope: SyncScope = {}) {
   const subscriptions = await prisma.subscription.findMany({
+    ...(scope.subscriptionIds ? { where: { id: { in: scope.subscriptionIds } } } : {}),
     select: { id: true, amountCents: true, billingDay: true, categoryId: true, note: true, name: true, startMonth: true, endMonth: true, active: true, billingPauses: true, billingHistory: true },
   });
   const currentMonth = referenceDate.slice(0, 7);
@@ -216,11 +267,12 @@ async function runSync(referenceDate: string, prisma: Prisma.TransactionClient) 
       skipDuplicates: true,
     });
   };
-  for (const candidate of iterateBillingCandidates(usable, referenceDate)) {
+  for (const candidate of iterateBillingCandidates(usable, referenceDate, { fromMonth: scope.month ?? scope.fromMonth, throughMonth: scope.month ?? scope.throughMonth })) {
     batch.push(candidate);
     if (batch.length === 500) await flush();
   }
   if (batch.length) await flush();
+  if (scope.subscriptionIds && !scope.month && !scope.fromMonth && !scope.throughMonth) await prisma.subscription.updateMany({ where: { id: { in: scope.subscriptionIds } }, data: { syncedThrough: new Date(`${referenceDate}T00:00:00.000Z`) } });
   return { created, ...summary };
 }
 

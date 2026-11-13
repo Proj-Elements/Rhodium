@@ -26,14 +26,14 @@ const weekdayDateFormatter = new Intl.DateTimeFormat("zh-CN", {
 });
 
 export function parseDateOnly(value: string): Date {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) throw badRequest("日期格式应为 YYYY-MM-DD");
+  if (!/^(?!0000)\d{4}-\d{2}-\d{2}$/.test(value)) throw badRequest("日期格式应为 YYYY-MM-DD，年份范围为 0001–9999");
   const date = new Date(`${value}T00:00:00.000Z`);
   if (Number.isNaN(date.getTime()) || dateOnlyKey(date) !== value) throw badRequest("日期无效");
   return date;
 }
 
 export function parseMonth(value: string): Date {
-  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) throw badRequest("月份格式应为 YYYY-MM");
+  if (!/^(?!0000)\d{4}-(0[1-9]|1[0-2])$/.test(value)) throw badRequest("月份格式应为 YYYY-MM，年份范围为 0001–9999");
   return new Date(`${value}-01T00:00:00.000Z`);
 }
 
@@ -48,6 +48,7 @@ export function monthKey(value: Date): string {
 export function addMonths(month: string, offset: number): string {
   const date = parseMonth(month);
   date.setUTCMonth(date.getUTCMonth() + offset);
+  if (date.getUTCFullYear() < 1 || date.getUTCFullYear() > 9999) throw badRequest("月份超出 0001–9999 年范围");
   return monthKey(date);
 }
 
@@ -58,8 +59,8 @@ export function monthStart(month: string): Date {
 
 /** Last calendar day of the month, UTC. */
 export function monthEnd(month: string): Date {
-  const date = parseMonth(addMonths(month, 1));
-  date.setUTCDate(date.getUTCDate() - 1);
+  const date = parseMonth(month);
+  date.setUTCMonth(date.getUTCMonth() + 1, 0);
   return date;
 }
 
@@ -71,7 +72,7 @@ export function daysInMonth(month: string): number {
 /** Current date in the app time zone as YYYY-MM-DD. */
 export function todayInShanghai(): string {
   const value = Object.fromEntries(dayKeyFormatter.formatToParts(new Date()).map((part) => [part.type, part.value]));
-  return `${value.year}-${value.month}-${value.day}`;
+  return `${value.year.padStart(4, "0")}-${value.month}-${value.day}`;
 }
 
 /** Clamp a recurring billing day (1-31) onto a real date in the month. */

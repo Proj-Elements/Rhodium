@@ -9,6 +9,7 @@
     "app/api/**/*.ts",
     "tests/integration/**/*.ts",
     "middleware.ts",
+    "instrumentation.ts",
     "vitest.integration.config.ts"
   ],
   "exclude": [

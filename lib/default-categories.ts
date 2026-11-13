@@ -1,0 +1,15 @@
+export const defaultCategories = [
+  { systemKey: "default-0", name: "餐饮", type: "EXPENSE", sortOrder: 0 },
+  { systemKey: "default-1", name: "饮料零食", type: "EXPENSE", sortOrder: 1 },
+  { systemKey: "default-2", name: "交通", type: "EXPENSE", sortOrder: 2 },
+  { systemKey: "default-3", name: "学习", type: "EXPENSE", sortOrder: 3 },
+  { systemKey: "default-4", name: "生活", type: "EXPENSE", sortOrder: 4 },
+  { systemKey: "default-5", name: "娱乐", type: "EXPENSE", sortOrder: 5 },
+  { systemKey: "default-6", name: "购物", type: "EXPENSE", sortOrder: 6 },
+  { systemKey: "default-7", name: "医疗", type: "EXPENSE", sortOrder: 7 },
+  { systemKey: "default-8", name: "住房", type: "EXPENSE", sortOrder: 8 },
+  { systemKey: "default-9", name: "其他", type: "BOTH", sortOrder: 9 },
+  { systemKey: "default-10", name: "兼职", type: "INCOME", sortOrder: 10 },
+  { systemKey: "default-11", name: "代写", type: "INCOME", sortOrder: 11 },
+  { systemKey: "default-12", name: "其他收入", type: "INCOME", sortOrder: 12 },
+] as const;

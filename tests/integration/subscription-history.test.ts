@@ -33,9 +33,9 @@ describe("subscription history across route mutations", () => {
     expect(response.status).toBe(201);
     const { subscription } = await response.json();
     at("2024-02-01");
-    expect((await editSubscription(request("subscriptions", "PATCH", { active: false }), routeContext({ id: subscription.id }))).status).toBe(200);
+    expect((await editSubscription(request("subscriptions", "PATCH", { active: false, expectedVersion: subscription.version }), routeContext({ id: subscription.id }))).status).toBe(200);
     at("2024-11-01");
-    expect((await editSubscription(request("subscriptions", "PATCH", { active: true }), routeContext({ id: subscription.id }))).status).toBe(200);
+    expect((await editSubscription(request("subscriptions", "PATCH", { active: true, expectedVersion: subscription.version + 1 }), routeContext({ id: subscription.id }))).status).toBe(200);
     await syncSubscriptions("2024-11-10");
     const rows = await prisma.transaction.findMany({ orderBy: { occurredOn: "asc" } });
     expect(rows.map((row) => row.subscriptionMonth?.toISOString().slice(0, 7))).toEqual(["2024-01", "2024-11"]);
@@ -46,9 +46,9 @@ describe("subscription history across route mutations", () => {
     const category = await createCategory();
     await createSubscription(request("subscriptions", "POST", { name: "会员", categoryId: category.id, amount: "10", billingDay: 5, startMonth: "2024-01" }));
     at("2024-02-01");
-    expect((await editCategory(request("categories", "PATCH", { archived: true }), routeContext({ id: category.id }))).status).toBe(200);
+    expect((await editCategory(request("categories", "PATCH", { archived: true, expectedVersion: category.version }), routeContext({ id: category.id }))).status).toBe(200);
     at("2024-11-01");
-    expect((await editCategory(request("categories", "PATCH", { archived: false }), routeContext({ id: category.id }))).status).toBe(200);
+    expect((await editCategory(request("categories", "PATCH", { archived: false, expectedVersion: category.version + 1 }), routeContext({ id: category.id }))).status).toBe(200);
     await syncSubscriptions("2024-11-10");
     const rows = await prisma.transaction.findMany({ orderBy: { occurredOn: "asc" } });
     expect(rows.map((row) => row.subscriptionMonth?.toISOString().slice(0, 7))).toEqual(["2024-01", "2024-11"]);
@@ -59,7 +59,7 @@ describe("subscription history across route mutations", () => {
     const category = await createCategory();
     const plan = { name: "会员", categoryId: category.id, amountCents: 1000, billingDay: 5, startMonth: "2024-01", endMonth: null, note: null };
     const subscription = await prisma.subscription.create({ data: { ...plan, startMonth: parseDateOnly("2024-01-01"), billingHistory: initialBillingHistory(plan) } });
-    const response = await editSubscription(request("subscriptions", "PATCH", { name: "会员", categoryId: category.id, amount: "25", billingDay: 20, startMonth: "2024-01", active: true }), routeContext({ id: subscription.id }));
+    const response = await editSubscription(request("subscriptions", "PATCH", { name: "会员", categoryId: category.id, amount: "25", billingDay: 20, startMonth: "2024-01", active: true, expectedVersion: subscription.version }), routeContext({ id: subscription.id }));
     expect(response.status).toBe(200);
     expect((await response.json()).subscription).toMatchObject({ amountCents: 2500, currentAmountCents: 1000, billingEffectiveMonth: "2024-04" });
     expect((await prisma.transaction.findMany()).map((row) => row.amountCents)).toEqual([1000, 1000, 1000]);

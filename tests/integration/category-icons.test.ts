@@ -34,10 +34,13 @@ describe("category icon persistence", () => {
     const response = await createCategory(jsonRequest("/api/categories", "POST", { name: "Legacy" }));
     const { category } = await response.json();
     expect(category.icon).toBeNull();
+    let expectedVersion = category.version;
     for (const icon of ["leaf", null]) {
-      const updated = await updateCategory(jsonRequest(`/api/categories/${category.id}`, "PATCH", { icon }), routeContext({ id: category.id }));
+      const updated = await updateCategory(jsonRequest(`/api/categories/${category.id}`, "PATCH", { icon, expectedVersion }), routeContext({ id: category.id }));
       expect(updated.status).toBe(200);
-      expect((await updated.json()).category.icon).toBe(icon);
+      const result = await updated.json();
+      expect(result.category.icon).toBe(icon);
+      expectedVersion = result.category.version;
     }
   });
 

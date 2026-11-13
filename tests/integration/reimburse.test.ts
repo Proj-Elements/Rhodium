@@ -205,7 +205,7 @@ describe("reimbursement flows through the aggregates", () => {
     expect(dashboard.budget).toEqual(initialBudget === null ? null : { amountCents: initialBudget });
     expect((await unreimburse(id)).status).toBe(409);
 
-    expect((await reopenMonth(new Request("http://localhost", { method: "POST" }), context)).status).toBe(200);
+    expect((await reopenMonth(new Request("http://localhost", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ expectedVersion: 1 }) }), context)).status).toBe(200);
     expect(await getMonthSummary(MONTH)).toMatchObject({ budgetCents: 50_000, expenseCents: 10_000, outOfPocketCents: 7_000, remainingCents: 43_000 });
     expect((await unreimburse(id)).status).toBe(200);
     const reopened = await (await getDashboard(new Request(`http://localhost/api/dashboard?month=${MONTH}`))).json();

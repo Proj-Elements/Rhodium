@@ -13,7 +13,7 @@ export async function getBudgetPreset(db: Prisma.TransactionClient = prisma): Pr
 /** Join an existing locked write, or acquire the ledger lock for a standalone change. */
 export async function setBudgetPreset(amountCents: number, tx?: Prisma.TransactionClient): Promise<void> {
   if (!tx) return withLedgerWrite((db) => setBudgetPreset(amountCents, db));
-  await tx.budgetPreset.upsert({ where: { id: 1 }, create: { id: 1, amountCents }, update: { amountCents } });
+  await tx.budgetPreset.upsert({ where: { id: 1 }, create: { id: 1, amountCents }, update: { amountCents, version: { increment: 1 } } });
 }
 
 export type BudgetSource = "month" | "preset" | "none" | "settlement";
@@ -72,7 +72,7 @@ export async function saveMonthlyBudget(month: string, amountCents: number): Pro
     await tx.monthlyBudget.upsert({
       where: { month: monthDate },
       create: { month: monthDate, amountCents },
-      update: { amountCents },
+      update: { amountCents, version: { increment: 1 } },
     });
   });
 }

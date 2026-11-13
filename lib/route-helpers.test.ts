@@ -81,8 +81,8 @@ describe("getCategoryColor", () => {
   it("always returns a palette entry with both tokens", () => {
     for (const id of ["a", "cat_1", "餐饮", "", "x".repeat(64)]) {
       const entry = getCategoryColor(id);
-      expect(entry.color).toMatch(/^var\(--/);
-      expect(entry.surface).toMatch(/^var\(--/);
+      expect(entry.color).toMatch(/^oklch\(var\(--category-color-lightness\)/);
+      expect(entry.surface).toMatch(/^oklch\(var\(--category-surface-lightness\)/);
     }
   });
 

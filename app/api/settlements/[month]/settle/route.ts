@@ -21,7 +21,7 @@ export async function POST(_request: Request, { params }: Context) {
     const settlement = await withLedgerWrite(async (tx) => {
       const existing = await tx.monthlySettlement.findUnique({ where: { month: monthStart(month) } });
       if (existing && !existing.reopenedAt) return existing;
-      await syncSubscriptions(undefined, tx);
+      await syncSubscriptions(undefined, tx, { month });
       const summary = await getMonthSummary(month, tx);
       const values = [summary.budgetCents, summary.expenseCents, summary.incomeCents, summary.remainingCents];
       if (values.some((value) => value !== null && (!Number.isSafeInteger(value) || value < -2_147_483_648 || value > 2_147_483_647))) {
