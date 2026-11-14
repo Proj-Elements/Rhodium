@@ -2,7 +2,7 @@ import type { Category, Prisma } from "@prisma/client";
 import type { BackupPayload } from "@/lib/backup-validation";
 import type { NormalizedRow } from "@/lib/import-parser";
 import type { ImportSummary } from "@/lib/import-preview-controller";
-import { monthKey, monthStart } from "@/lib/domain";
+import { monthEnd, monthKey, monthStart } from "@/lib/domain";
 import { getLockedMonths } from "@/lib/summary";
 import { canonicalBackupValue, restoreBackupHistory } from "@/lib/backup-history";
 import { importChunks } from "@/lib/import-batches";
@@ -132,13 +132,13 @@ export async function summarizeImport(db: Prisma.TransactionClient, rows: Normal
   for (const settlement of backup?.settlements ?? []) {
     if (settlement.reopenedAt) continue;
     const start = monthStart(settlement.month.slice(0, 7));
-    const end = new Date(start); end.setUTCMonth(end.getUTCMonth() + 1);
-    const monthRows = await db.transaction.findMany({ where: { occurredOn: { gte: start, lt: end } } });
+    const end = monthEnd(monthKey(start));
+    const monthRows = await db.transaction.findMany({ where: { occurredOn: { gte: start, lte: end } } });
     const finalRows = new Map<string, { type: string; amountCents: number; categoryId: string | null; deletedAt: Date | null; reimbursedAt: Date | null }>(
       monthRows.filter((row) => !idSet.has(row.id)).map((row) => [row.id, row]),
     );
     rows.forEach((row, index) => {
-      if (row.occurredOn >= start && row.occurredOn < end) finalRows.set(row.externalId ?? `append:${index}`, { ...row, categoryId: mappedCategories.get(row.categoryId ?? "") ?? row.categoryId });
+      if (row.occurredOn >= start && row.occurredOn <= end) finalRows.set(row.externalId ?? `append:${index}`, { ...row, categoryId: mappedCategories.get(row.categoryId ?? "") ?? row.categoryId });
     });
     let expense = 0; let income = 0; let reimbursed = 0;
     for (const row of finalRows.values()) {

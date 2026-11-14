@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handleApiError, parseJsonBody } from "@/lib/api";
+import { assertValidText, handleApiError, parseJsonBody } from "@/lib/api";
 import { monthKey } from "@/lib/domain";
 import { badRequest, conflict, notFound } from "@/lib/errors";
 import { withLedgerWrite } from "@/lib/ledger-write";
@@ -16,6 +16,7 @@ type Context = { params: Promise<{ id: string }> };
 export async function PATCH(request: Request, { params }: Context) {
   try {
     const { id } = await params;
+    assertValidText(id);
     const body = await parseJsonBody(request);
     return await withLedgerWrite(async (tx) => {
       const existing = await tx.transaction.findUnique({ where: { id }, include: transactionInclude });
@@ -68,6 +69,7 @@ export async function PATCH(request: Request, { params }: Context) {
 export async function DELETE(request: Request, { params }: Context) {
   try {
     const { id } = await params;
+    assertValidText(id);
     return await withLedgerWrite(async (tx) => {
       const existing = await tx.transaction.findUnique({ where: { id }, include: transactionInclude });
       if (!existing) throw notFound("账目不存在");

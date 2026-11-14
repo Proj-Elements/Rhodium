@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { type Prisma, TransactionType } from "@prisma/client";
-import { handleApiError, parseJsonBody, monthRange } from "@/lib/api";
+import { assertValidText, handleApiError, parseJsonBody, monthRange } from "@/lib/api";
 import { monthKey, parseMonth, todayInShanghai } from "@/lib/domain";
 import { badRequest, conflict } from "@/lib/errors";
 import { withLedgerRead, withLedgerWrite } from "@/lib/ledger-write";
@@ -32,11 +32,12 @@ export async function GET(request: Request) {
     const limit = Number(limitValue);
     const cursor = url.searchParams.get("cursor");
     if (cursor && cursor.length > 60) throw badRequest("分页游标无效");
+    assertValidText(query, categoryId, cursor);
     const result = await withLedgerRead(async (tx) => {
       const range = month === "all" ? null : monthRange(month);
       const where: Prisma.TransactionWhereInput = {
         deletedAt: deleted === "only" ? { not: null } : null,
-        ...(range ? { occurredOn: { gte: range.start, lt: range.nextStart } } : {}),
+        ...(range ? { occurredOn: { gte: range.start, lte: range.end } } : {}),
         ...(type ? { type: type === "expense" ? TransactionType.EXPENSE : TransactionType.INCOME } : {}),
         ...(categoryId ? { categoryId } : {}),
         ...(query ? { OR: [

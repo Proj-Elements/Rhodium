@@ -38,8 +38,12 @@ export function requestSecurityError(request: NextRequest): string | null {
     }
   }
   const hasFetchMetadata = ["sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest", "sec-fetch-user"].some((name) => request.headers.has(name));
-  if (hasFetchMetadata && site !== "same-origin" && site !== "none") return "浏览器请求来源信息不完整";
-  if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && hasFetchMetadata && (site !== "same-origin" || !origin)) {
+  // Node's native fetch adds Sec-Fetch-Mode without browser site metadata.
+  // A Bearer caller is authenticated separately; foreign Origin/Site are still rejected above.
+  const nativeBearer = !site && request.headers.get("authorization")?.startsWith("Bearer ") &&
+    !request.headers.has("sec-fetch-dest") && !request.headers.has("sec-fetch-user");
+  if (hasFetchMetadata && !nativeBearer && site !== "same-origin" && site !== "none") return "浏览器请求来源信息不完整";
+  if (!["GET", "HEAD", "OPTIONS"].includes(request.method) && hasFetchMetadata && !nativeBearer && (site !== "same-origin" || !origin)) {
     return "浏览器写入必须携带同源 Origin";
   }
   return null;

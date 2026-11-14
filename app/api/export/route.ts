@@ -36,9 +36,8 @@ function serializedRow(row: object, dates: Section["dates"] = {}) {
     : value]));
 }
 
-async function exportJson(tx: Prisma.TransactionClient) {
+async function exportJson(tx: Prisma.TransactionClient, output: ReturnType<typeof createExportBuffer>) {
   // The restore request wraps this JSON in {backup: ...}; include those bytes in the cap.
-  const output = createExportBuffer(MAX_IMPORT_BODY_BYTES - Buffer.byteLength('{"backup":}'));
   const preset = await tx.budgetPreset.findUnique({ where: { id: 1 } });
   const budgetPreset = preset ? { amountCents: preset.amountCents, updatedAt: preset.updatedAt.toISOString() } : null;
   backupSchema.parse({ budgetPreset });
@@ -64,13 +63,11 @@ async function exportJson(tx: Prisma.TransactionClient) {
     output.append("]");
   }
   output.append("}");
-  return output.finish();
 }
 
-async function exportCsv(tx: Prisma.TransactionClient) {
+async function exportCsv(tx: Prisma.TransactionClient, output: ReturnType<typeof createExportBuffer>) {
   const headers = ["日期", "类型", "金额", "分类", "备注", "来源", "报销时间"];
   const header = toCsv(headers, []);
-  const output = createExportBuffer();
   output.append(header);
   let cursor: string | undefined;
   while (true) {
@@ -90,19 +87,23 @@ async function exportCsv(tx: Prisma.TransactionClient) {
     cursor = rows.at(-1)!.id;
     if (rows.length < PAGE_SIZE) break;
   }
-  return output.finish();
 }
 
 export async function GET(request: Request) {
+  let output: ReturnType<typeof createExportBuffer> | undefined;
   try {
     const format = new URL(request.url).searchParams.get("format") || "json";
     if (format !== "json" && format !== "csv") return jsonError("导出格式只能是 JSON 或 CSV", 400);
-    const stream = await withLedgerRead((tx) => format === "json" ? exportJson(tx) : exportCsv(tx), { timeout: 120_000 });
+    output = createExportBuffer(format === "json" ? MAX_IMPORT_BODY_BYTES - Buffer.byteLength('{"backup":}') : undefined, request.signal);
+    const spool = output;
+    await withLedgerRead((tx) => format === "json" ? exportJson(tx, spool) : exportCsv(tx, spool), { timeout: 120_000 });
+    const stream = output.finish();
     return new NextResponse(stream, { headers: {
       "Content-Type": format === "json" ? "application/json" : "text/csv; charset=utf-8",
       "Content-Disposition": `attachment; filename="${format === "json" ? "rhodium-backup.json" : "rhodium-transactions.csv"}"`,
     } });
   } catch (error) {
+    output?.dispose();
     return handleApiError(error);
   }
 }

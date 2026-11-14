@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { handleApiError, MAX_IMPORT_BODY_BYTES, parseJsonBody } from "@/lib/api";
-import { monthKey, monthStart, todayInShanghai } from "@/lib/domain";
+import { monthEnd, monthKey, monthStart, todayInShanghai } from "@/lib/domain";
 import {
   normalizeRow,
   parseBoolean,
@@ -213,15 +213,14 @@ async function importSettlements(tx: Tx, backup: BackupPayload, idMap: IdMap) {
       ...(row.updatedAt ? { updatedAt: new Date(row.updatedAt) } : {}),
     };
     if (!data.reopenedAt) {
-      const nextMonth = new Date(month);
-      nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+      const finalDay = monthEnd(row.month.slice(0, 7));
       const totals = await tx.transaction.groupBy({
         by: ["type"],
-        where: { deletedAt: null, occurredOn: { gte: month, lt: nextMonth } },
+        where: { deletedAt: null, occurredOn: { gte: month, lte: finalDay } },
         _sum: { amountCents: true },
       });
       const reimbursed = await tx.transaction.aggregate({
-        where: { deletedAt: null, type: "EXPENSE", reimbursedAt: { not: null }, occurredOn: { gte: month, lt: nextMonth } },
+        where: { deletedAt: null, type: "EXPENSE", reimbursedAt: { not: null }, occurredOn: { gte: month, lte: finalDay } },
         _sum: { amountCents: true },
       });
       const expense = totals.find((item) => item.type === "EXPENSE")?._sum.amountCents ?? 0;
@@ -233,7 +232,7 @@ async function importSettlements(tx: Tx, backup: BackupPayload, idMap: IdMap) {
       }
       if (row.categorySnapshot) {
         const actual = await tx.transaction.groupBy({
-          by: ["categoryId", "type", "reimbursedAt"], where: { deletedAt: null, occurredOn: { gte: month, lt: nextMonth } }, _sum: { amountCents: true },
+          by: ["categoryId", "type", "reimbursedAt"], where: { deletedAt: null, occurredOn: { gte: month, lte: finalDay } }, _sum: { amountCents: true },
         });
         const categories = new Map<string, { expenseCents: number; outOfPocketCents: number; incomeCents: number }>();
         for (const entry of actual) {

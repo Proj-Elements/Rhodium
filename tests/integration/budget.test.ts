@@ -153,7 +153,7 @@ describe("dashboard budget", () => {
     await prisma.transaction.update({ where: { id: reimbursed.id }, data: { reimbursedAt: new Date() } });
 
     const response = await getDashboard(new Request(`http://localhost/api/dashboard?month=${MONTH}`));
-    expect(await response.json()).toMatchObject({ expenseCents: 3000, outOfPocketCents: 3000, focusDateExpenseCents: 3000, reimbursedCents: 5000 });
+    expect(await response.json()).toMatchObject({ expenseCents: 8000, outOfPocketCents: 3000, focusDateExpenseCents: 3000, reimbursedCents: 5000 });
   });
 
   it("keeps a configured zero budget distinct from an unset budget", async () => {

@@ -43,7 +43,9 @@ export function withLedgerWrite<T>(
       if (error && typeof error === "object" && "code" in error && error.code === "P2010" && "meta" in error && (error.meta as { code?: string })?.code === "55P03") throw conflict("账本正在处理其他写入，请稍后重试");
       throw error;
     }
-    return work(tx);
+    const result = await work(tx);
+    await tx.$executeRaw`UPDATE "LedgerRevision" SET "revision" = "revision" + 1 WHERE "id" = 1`;
+    return result;
   }, {
     maxWait: 15_000,
     timeout: 120_000,

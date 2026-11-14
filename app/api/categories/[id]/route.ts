@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handleApiError, parseJsonBody, jsonError } from "@/lib/api";
+import { assertValidText, handleApiError, parseJsonBody, jsonError } from "@/lib/api";
 import { conflict, notFound } from "@/lib/errors";
 import { withLedgerWrite } from "@/lib/ledger-write";
 import { invalidateSubscriptionSyncCache } from "@/lib/subscriptions";
@@ -15,6 +15,7 @@ type Context = { params: Promise<{ id: string }> };
 export async function PATCH(request: Request, { params }: Context) {
   try {
     const { id } = await params;
+    assertValidText(id);
     const body = categoryPatchSchema.parse(await parseJsonBody(request));
     const response = await withLedgerWrite(async (tx) => {
       const category = await tx.category.findUnique({ where: { id } });

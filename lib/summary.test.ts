@@ -192,13 +192,13 @@ describe("getMonthSummary", () => {
     expect(summary.categoryBreakdown).toEqual([{ categoryId: "cat_food", categoryName: "原始分类", amountCents: 5000 }]);
   });
 
-  it("queries the month as a half-open range", async () => {
+  it("queries DATE columns through the inclusive final day of the month", async () => {
     await getMonthSummary(MONTH);
 
     const where = findTransactions.mock.calls[0][0]?.where as { occurredOn: { gte: Date; lt: Date }; deletedAt: null };
     expect(where.deletedAt).toBeNull();
     expect(where.occurredOn.gte.toISOString()).toBe("2024-01-01T00:00:00.000Z");
-    expect(where.occurredOn.lt.toISOString()).toBe("2024-02-01T00:00:00.000Z");
+    expect(where.occurredOn.lte.toISOString()).toBe("2024-01-31T00:00:00.000Z");
   });
 
   it("keeps income out of expense totals, categories and top-date", async () => {

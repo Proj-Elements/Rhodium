@@ -34,6 +34,18 @@ describe("parseJsonBody", () => {
     await expect(parseJsonBody(jsonRequest("{not json"))).rejects.toMatchObject({ status: 400 });
   });
 
+  it("rejects invalid UTF-8 instead of silently changing imported text", async () => {
+    const body = Buffer.concat([Buffer.from('{"note":"'), Buffer.from([0xff]), Buffer.from('"}')]);
+    const request = new Request("http://localhost/api/test", { method: "POST", headers: { "content-type": "application/json" }, body });
+    await expect(parseJsonBody(request)).rejects.toMatchObject({ status: 400 });
+  });
+  it.each(["nul\u0000text", "high\ud800", "low\udfff"])("rejects text PostgreSQL cannot store: %j", async (note) => {
+    await expect(parseJsonBody(jsonRequest(JSON.stringify({ note })))).rejects.toMatchObject({ status: 400 });
+  });
+  it("preserves valid surrogate pairs used by emoji", async () => {
+    await expect(parseJsonBody(jsonRequest(JSON.stringify({ note: "午饭🍜" })))).resolves.toEqual({ note: "午饭🍜" });
+  });
+
   it("rejects an oversized body with a 413", async () => {
     const oversized = `{"note":"${"啊".repeat(200)}"}`;
     await expect(parseJsonBody(jsonRequest(oversized), 64)).rejects.toBeInstanceOf(AppError);

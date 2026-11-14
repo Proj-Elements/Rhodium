@@ -6,7 +6,7 @@ services:
       POSTGRES_USER: yueyu
       # 口令在 .env 里通过 POSTGRES_PASSWORD 覆盖（见 .env.example）；
       # 未设置时使用开发默认值，仅在首次创建数据卷时生效。
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-yueyu_password}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请设置数据库强口令}
       POSTGRES_DB: yueyu
       TZ: Asia/Shanghai
     # Bound to loopback by default: the app reaches Postgres over the compose
@@ -35,7 +35,8 @@ services:
       PGPORT: 5432
       PGDATABASE: yueyu
       PGUSER: yueyu
-      PGPASSWORD: ${POSTGRES_PASSWORD:-yueyu_password}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?请设置数据库强口令}
+      RHODIUM_ACCESS_TOKEN: ${RHODIUM_ACCESS_TOKEN:-}
       RHODIUM_ALLOWED_HOSTS: ${RHODIUM_ALLOWED_HOSTS:-}
       RHODIUM_ALLOWED_ORIGINS: ${RHODIUM_ALLOWED_ORIGINS:-}
       RHODIUM_TRUST_PROXY: ${RHODIUM_TRUST_PROXY:-false}
@@ -43,9 +44,7 @@ services:
       PORT: 3030
       HOSTNAME: 0.0.0.0
       TZ: Asia/Shanghai
-    # The app ships without any authentication, so it is bound to loopback by
-    # default: whoever reaches this port can read and write the whole ledger.
-    # Set APP_BIND=0.0.0.0 only on a network you trust.
+    # Keep loopback binding even with token authentication. Remote access needs HTTPS.
     ports:
       - "${APP_BIND:-127.0.0.1}:3030:3030"
     healthcheck:

@@ -139,14 +139,17 @@ jobs:
           HEROUI_KEY: ${{ secrets.HEROUI_KEY }}
         run: |
           docker build --secret id=heroui_key,env=HEROUI_KEY --tag rhodium-ci:check .
+          export RHODIUM_ACCESS_TOKEN="$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
           docker run --detach --name rhodium-ci --network host \
-            --env DATABASE_URL --env PORT=3033 --env HOSTNAME=127.0.0.1 rhodium-ci:check
+            --env DATABASE_URL --env RHODIUM_ACCESS_TOKEN --env PORT=3033 --env HOSTNAME=127.0.0.1 rhodium-ci:check
           trap 'docker logs rhodium-ci; docker rm --force rhodium-ci >/dev/null' EXIT
           for attempt in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:3033/api/health; then break; fi
             sleep 1
           done
           curl --fail --silent http://127.0.0.1:3033/api/health
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:3033/api/revision)" = 401
+          curl --fail --silent --header "Authorization: Bearer $RHODIUM_ACCESS_TOKEN" http://127.0.0.1:3033/api/revision
           docker exec rhodium-ci node -e 'if (process.getuid() === 0 || process.env.HEROUI_KEY || require("node:fs").existsSync("/run/secrets/heroui_key")) process.exit(1)'
           docker stop --time 15 rhodium-ci
           test "$(docker inspect --format '{{.State.ExitCode}}' rhodium-ci)" = 0

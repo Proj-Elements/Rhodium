@@ -60,7 +60,7 @@ CSV 导出包含报销时间，并在最后一列 `__rhodium_csv_encoding` 写�
 
 ### Security and deployment
 
-API 没有身份信息或所有权概念。回环端口绑定、受信任网络中的认证反向代理或 VPN 是访问控制边界。API 请求校验 Host、Origin 和 Fetch Metadata；有请求体的写接口还校验 JSON 内容类型。不带浏览器来源信息的本地 Agent 在提交请求体时仍须提供正确的 `Content-Type`。外部部署显式配置允许的 Host 和 Origin，不能把请求头校验视为登录。
+API 没有多用户身份或所有权模型。除健康检查外，页面和 API 要求共享令牌（浏览器 Basic、Agent Bearer）；未配置有效令牌时拒绝访问。回环端口绑定和 HTTPS 代理仍是部署边界。API 请求校验 Host、Origin 和 Fetch Metadata；有请求体的写接口还校验 JSON 内容类型。不带浏览器来源信息的本地 Agent 在提交请求体时仍须提供正确的 `Content-Type`。外部部署显式配置允许的 Host 和 Origin，不能把请求头校验视为登录。
 
 进程内固定窗口限流仅约束失控请求，追踪键有硬上限；默认不信任转发 IP，只有显式启用受信任代理配置后才使用转发头。安全响应头与 `Cache-Control: no-store` 不能防止已获访问权的用户读取或清空账本。
 
@@ -90,3 +90,5 @@ API 没有身份信息或所有权概念。回环端口绑定、受信任网络�
 ## Supporting documents
 
 README 说明运行与安全边界；`public/skill/SKILL.md` 是随应用分发的 Agent 接口使用说明；`docs/frontend-redesign.md` 为历史设计/验收输入；`docs/cursor-design-analysis.md` 是另一产品的参考资料。历史文档不替代当前接口、迁移及验证结果。
+
+账本写事务在提交时递增 `LedgerRevision` 单行序号，回滚不产生变更信号；可见页面每 15 秒读取 `/api/revision`。该运行时序号不属于财务备份。

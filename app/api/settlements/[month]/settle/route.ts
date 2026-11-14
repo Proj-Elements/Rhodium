@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { handleApiError, jsonError } from "@/lib/api";
-import { monthStart, parseMonth, todayInShanghai } from "@/lib/domain";
+import { monthEnd, monthStart, parseMonth, todayInShanghai } from "@/lib/domain";
 import { withLedgerWrite } from "@/lib/ledger-write";
 import { badRequest } from "@/lib/errors";
 import { getMonthSummary } from "@/lib/summary";
@@ -27,10 +27,9 @@ export async function POST(_request: Request, { params }: Context) {
       if (values.some((value) => value !== null && (!Number.isSafeInteger(value) || value < -2_147_483_648 || value > 2_147_483_647))) {
         throw badRequest("结算合计超出可保存范围，请先调整账目金额");
       }
-      const nextMonth = monthStart(month);
-      nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+      const finalDay = monthEnd(month);
       const transactions = await tx.transaction.findMany({
-        where: { deletedAt: null, occurredOn: { gte: monthStart(month), lt: nextMonth } },
+        where: { deletedAt: null, occurredOn: { gte: monthStart(month), lte: finalDay } },
         select: { categoryId: true, category: { select: { name: true } }, type: true, amountCents: true, reimbursedAt: true },
       });
       const categories = new Map<string, SettlementCategorySnapshot>();

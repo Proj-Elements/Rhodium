@@ -5,7 +5,7 @@ description: 查询与管理「Rhodium」本地个人记账应用的账本：查
 
 # Rhodium（rhodium-ledger）记账 API
 
-「Rhodium」是单用户、无登录的个人记账应用，全部能力通过本地 REST API 暴露。工作方式：连接自检 → 用路由表选接口 → 照抄本文示例改参数执行 → 按「错误应对」处理异常。
+「Rhodium」是使用共享令牌保护的单用户个人记账应用，全部能力通过本地 REST API 暴露。工作方式：连接自检 → 用路由表选接口 → 照抄本文示例改参数执行 → 按「错误应对」处理异常。
 
 ## 0. 连接自检（会话开始时跑一次）
 
@@ -15,9 +15,9 @@ curl -fsSL $BASE/api/health       # 正常返回 {"status":"ok","database":"ok"}
 ```
 
 - 503 = 应用活着但数据库不可达；连接失败 = 应用没启动或端口不同，让用户启动应用。自检一次即可，之后不要轮询。
-- 无鉴权：应用没有任何登录保护，只应绑定回环地址使用，不要把地址转发给不可信网络。
+- 除健康检查外均需认证。使用 `RHODIUM_ACCESS_TOKEN` 对应令牌，通过 `Authorization: Bearer <令牌>` 请求；浏览器使用 Basic 用户名 `rhodium`、密码为令牌。令牌不得写进技能或日志，远程连接必须使用 HTTPS。下文 curl 示例需自行附带认证头。
 - 限流使用进程内固定窗口：读 600 次/分钟、写 120 次/分钟、`/api/import*` 12 次/分钟，重启会重置计数。触发返回 429 与 `Retry-After` 响应头，等那么多秒再重试；批量写入时把请求间隔开。
-- 写请求统一使用 `Content-Type: application/json`。本机 CLI 无需伪造 `Origin` 或转发地址；自定义访问域名必须先配置允许的 Host，浏览器跨站请求会被拒绝。这些检查不能代替登录鉴权。
+- 写请求统一使用 `Content-Type: application/json`。本机 CLI 无需伪造 `Origin` 或转发地址；自定义访问域名必须先配置允许的 Host，浏览器跨站请求会被拒绝。这些检查与令牌鉴权共同生效。
 
 ## 1. 动手前先记住四条硬规则
 
@@ -52,11 +52,11 @@ curl -fsSL $BASE/api/dashboard            # 当月；?month=2026-09 看指定月
 
 按问题读字段：
 
-- 花了多少 → `expenseCents` / `incomeCents`（记得除以 100）。
-- 有报销 → `reimbursedCents` / `reimbursedCount` 是已报销金额与笔数，已从 `expenseCents` 与预算口径中排除；报销可随时撤销（见 §3.4）。
+- 账面支出 → `expenseCents`；实际自付 → `outOfPocketCents`；收入 → `incomeCents`（记得除以 100）。
+- 有报销 → `reimbursedCents` / `reimbursedCount` 是已报销金额与笔数，仍包含在 `expenseCents` 中，从 `outOfPocketCents` 与预算口径中排除；报销可随时撤销（见 §3.4）。
 - 预算够不够 → `remainingCents`、`usagePercent`；`budget`（`{amountCents}` 或 null）配合 `budgetSource`：`month`=本月显式预算、`preset`=全局预设兜底、`settlement`=已结算月份的冻结预算、`none`=未设预算。预算为 0 是明确设置，不等于未设预算。
 - 钱花在哪 → `categoryBreakdown`（分类排行，按金额降序，不含报销）。
-- 近期走势 → `recentExpenses` 最近 7 天逐日支出（不含报销）；日均 = `expenseCents / daysElapsed`（`daysElapsed`/`daysInMonth` 为已过/总天数，只有当月 `daysElapsed` 小于总天数）。
+- 近期走势 → `recentExpenses` 最近 7 天逐日支出（不含报销）；自付日均 = `outOfPocketCents / daysElapsed`（`daysElapsed`/`daysInMonth` 为已过/总天数，只有当月 `daysElapsed` 小于总天数）。
 - 刚花了什么 → `recentTransactions` 最近 10 笔；`focusDateExpenseCents` 当日支出。
 
 ### 3.2 查某月账目清单
@@ -250,7 +250,8 @@ curl -fsSL -X PATCH $BASE/api/categories/<id> -H 'content-type: application/json
 
 | 方法 + 路径 | 作用 |
 |---|---|
-| GET /api/health | 健康检查 |
+| GET /api/health | 健康检查（无需认证） |
+| GET /api/revision | 账本变更序号，用于前台刷新 |
 | GET /api/dashboard?month= | 当月/指定月总览 |
 | GET /api/transactions?month=&type=&q=&deleted=&cursor= | 分页账目、跨月搜索和回收站；`month=all` 跨月，`deleted=only` 查删除项 |
 | POST /api/transactions | 记账 `{type,amount,occurredOn,categoryId,note?}`，带 `Idempotency-Key` |

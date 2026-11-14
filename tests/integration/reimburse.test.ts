@@ -201,7 +201,7 @@ describe("reimbursement flows through the aggregates", () => {
       reimbursedCents: 3_000, incomeCents: 0, remainingCents,
     });
     const dashboard = await (await getDashboard(new Request(`http://localhost/api/dashboard?month=${MONTH}`))).json();
-    expect(dashboard).toMatchObject({ expenseCents: 7_000, outOfPocketCents: 7_000, reimbursedCents: 3_000, remainingCents });
+    expect(dashboard).toMatchObject({ expenseCents: 10_000, outOfPocketCents: 7_000, reimbursedCents: 3_000, remainingCents });
     expect(dashboard.budget).toEqual(initialBudget === null ? null : { amountCents: initialBudget });
     expect((await unreimburse(id)).status).toBe(409);
 
@@ -212,7 +212,7 @@ describe("reimbursement flows through the aggregates", () => {
     expect(reopened).toMatchObject({ expenseCents: 10_000, reimbursedCents: 0, remainingCents: 40_000 });
   });
 
-  it("dashboard excludes reimbursed expenses from totals, budget and category breakdown", async () => {
+  it("dashboard reports gross expenses but excludes reimbursement from budget and category breakdown", async () => {
     const reimbursedId = await createExpense("30.00", `${MONTH}-05`);
     const keptId = await createExpense("70.00", `${MONTH}-06`);
     await reimburse(reimbursedId);
@@ -227,7 +227,7 @@ describe("reimbursement flows through the aggregates", () => {
       categoryBreakdown: { amountCents: number }[];
     };
 
-    expect(payload.expenseCents).toBe(7_000);
+    expect(payload.expenseCents).toBe(10_000);
     expect(payload.outOfPocketCents).toBe(7_000);
     expect(payload.reimbursedCents).toBe(3_000);
     expect(payload.reimbursedCount).toBe(1);

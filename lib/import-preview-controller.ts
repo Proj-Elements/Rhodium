@@ -20,7 +20,7 @@ export type ImportSummary = {
   conflicts: string[];
 };
 
-type ImportFile = Pick<File, "name" | "text">;
+type ImportFile = Pick<File, "name" | "size" | "arrayBuffer">;
 export type ImportSelection = {
   format: "json" | "csv";
   rows: Record<string, unknown>[];
@@ -50,7 +50,10 @@ export function createImportPreviewController(
       try {
         const file = await pendingFile;
         if (controller.signal.aborted) return;
-        const text = await file.text();
+        if (!Number.isSafeInteger(file.size) || file.size < 0 || file.size > 64 * 1024 * 1024) {
+          throw new Error("导入文件不能超过 64 MiB");
+        }
+        const text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
         if (controller.signal.aborted) return;
         const format = file.name.toLowerCase().endsWith(".json") ? "json" : "csv";
         let backup: Record<string, unknown> | undefined;

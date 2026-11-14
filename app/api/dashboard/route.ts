@@ -6,6 +6,7 @@ import { withLedgerRead } from "@/lib/ledger-write";
 import { serializeTransaction, transactionInclude } from "@/lib/serializers";
 import { resolveBudget } from "@/lib/budget";
 import { settlementCategorySnapshot } from "@/lib/summary";
+import { budgetVersion } from "@/lib/budget-version";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const month = url.searchParams.get("month") || todayInShanghai().slice(0, 7);
     parseMonth(month);
-    const { start, end, nextStart } = monthRange(month);
+    const { start, end } = monthRange(month);
     const today = todayInShanghai();
     const currentMonth = today.slice(0, 7);
     const todayDate = new Date(`${today}T00:00:00.000Z`);
@@ -25,10 +26,10 @@ export async function GET(request: Request) {
     const chartStart = month === currentMonth || recentStart >= start ? recentStart : start;
     const chartDayCount = Math.floor((focusDate.getTime() - chartStart.getTime()) / 86_400_000) + 1;
 
-    const monthTxWhere = { deletedAt: null as null, occurredOn: { gte: start, lt: nextStart } };
+    const monthTxWhere = { deletedAt: null as null, occurredOn: { gte: start, lte: end } };
     // 报销的支出不占预算：支出合计排除它们，报销额与笔数单独聚合。
     const monthExpenseWhere = { ...monthTxWhere, type: TransactionType.EXPENSE };
-    const [budget, expense, reimbursed, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups, categories, settlement] = await withLedgerRead((tx) => Promise.all([
+    const [budget, expense, reimbursed, income, focusGroups, transactions, grouped, transactionCount, expenseTransactionCount, recentExpenseGroups, recentIncomeGroups, categories, settlement, observedBudgetVersion] = await withLedgerRead((tx) => Promise.all([
       resolveBudget(month, tx),
       tx.transaction.aggregate({
         where: { ...monthExpenseWhere, reimbursedAt: null },
@@ -80,6 +81,7 @@ export async function GET(request: Request) {
       // sequential round trip once the expense grouping is known.
       tx.category.findMany({ select: { id: true, name: true } }),
       tx.monthlySettlement.findUnique({ where: { month: start } }),
+      budgetVersion(tx, month),
     ]));
 
     const categoryMap = new Map(categories.map((category) => [category.id, category.name]));
@@ -102,14 +104,15 @@ export async function GET(request: Request) {
         ? null
         : settlement.budgetAmountCents
       : budget.amountCents;
-    // Unlike monthly summaries, dashboard expenses are net of reimbursement.
-    const expenseCents = settled
+    const outOfPocketCents = settled
       ? settlement.remainingAmountCents === null
         ? settlement.expenseAmountCents - reimbursedCents
         : settlement.budgetAmountCents - settlement.remainingAmountCents
       : expense._sum.amountCents ?? 0;
     const incomeCents = settled ? settlement.incomeAmountCents : income._sum.amountCents ?? 0;
-    const remainingCents = settled ? settlement.remainingAmountCents : calculateRemaining(budgetCents, expenseCents);
+    // Match monthly summaries: expenseCents is gross; budgeting uses self-paid expenses.
+    const expenseCents = settled ? settlement.expenseAmountCents : outOfPocketCents + reimbursedCents;
+    const remainingCents = settled ? settlement.remainingAmountCents : calculateRemaining(budgetCents, outOfPocketCents);
     const capturedCategories = settled ? settlementCategorySnapshot(settlement.categorySnapshot) : null;
     const categoryBreakdown = capturedCategories
       ? capturedCategories.filter((item) => item.outOfPocketCents > 0).map((item) => ({
@@ -128,15 +131,16 @@ export async function GET(request: Request) {
       focusDate: dateOnlyKey(focusDate),
       budget: budgetCents === null ? null : { amountCents: budgetCents },
       budgetSource: settled ? "settlement" : budget.source,
+      budgetVersion: observedBudgetVersion,
       locked: settled,
       readOnly: settled,
       expenseCents,
-      outOfPocketCents: expenseCents,
+      outOfPocketCents,
       reimbursedCents,
       reimbursedCount: reimbursed._count._all,
       incomeCents,
       remainingCents,
-      usagePercent: calculateUsage(budgetCents, expenseCents),
+      usagePercent: calculateUsage(budgetCents, outOfPocketCents),
       focusDateExpenseCents,
       focusDateIncomeCents,
       transactionCount,

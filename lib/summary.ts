@@ -1,5 +1,5 @@
 import { TransactionType, type Prisma } from "@prisma/client";
-import { calculateRemaining, dateOnlyKey, daysInMonth, monthKey, monthStart, todayInShanghai } from "@/lib/domain";
+import { monthEnd, calculateRemaining, dateOnlyKey, daysInMonth, monthKey, monthStart, todayInShanghai } from "@/lib/domain";
 import { resolveBudget, resolveBudgets, type ResolvedBudget } from "@/lib/budget";
 import { prisma } from "@/lib/prisma";
 import { serializeSettlement } from "@/lib/serializers";
@@ -195,15 +195,14 @@ export type MonthSummary = ReturnType<typeof summarizeMonth>;
 export async function getMonthSummary(month: string, db?: Prisma.TransactionClient): Promise<MonthSummary> {
   if (!db) return withLedgerRead((tx) => getMonthSummary(month, tx));
   const start = monthStart(month);
-  const nextStart = new Date(start);
-  nextStart.setUTCMonth(nextStart.getUTCMonth() + 1);
+  const end = monthEnd(month);
 
   const [budget, transactions, settlement] = await Promise.all([
     // Must go through resolveBudget: a month with no explicit row still
     // inherits the preset, and settlement snapshots are built from this value.
     resolveBudget(month, db),
     db.transaction.findMany({
-      where: { deletedAt: null, occurredOn: { gte: start, lt: nextStart } },
+      where: { deletedAt: null, occurredOn: { gte: start, lte: end } },
       select: SUMMARY_SELECT,
     }),
     db.monthlySettlement.findUnique({ where: { month: start } }),
@@ -223,13 +222,12 @@ export async function getMonthSummaries(months: string[], db?: Prisma.Transactio
   const starts = months.map(monthStart);
   const times = starts.map((date) => date.getTime());
   const rangeStart = new Date(Math.min(...times));
-  const rangeEnd = new Date(Math.max(...times));
-  rangeEnd.setUTCMonth(rangeEnd.getUTCMonth() + 1);
+  const rangeEnd = monthEnd(monthKey(new Date(Math.max(...times))));
 
   const [budgets, transactions, settlements] = await Promise.all([
     resolveBudgets(months, db),
     db.transaction.findMany({
-      where: { deletedAt: null, occurredOn: { gte: rangeStart, lt: rangeEnd } },
+      where: { deletedAt: null, occurredOn: { gte: rangeStart, lte: rangeEnd } },
       select: SUMMARY_SELECT,
     }),
     db.monthlySettlement.findMany({ where: { month: { in: starts } } }),
