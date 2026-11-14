@@ -14,7 +14,8 @@ export function startLedgerPolling(options: {
     try {
       const current = await options.read(controller.signal);
       if (controller.signal.aborted) return;
-      if (previous !== undefined && current !== previous) options.changed();
+      // The page's initial snapshot may predate this first response; reconcile it too.
+      if (current !== previous) options.changed();
       previous = current;
     } catch { /* Keep the last version; a later successful poll catches missed writes. */ }
     finally { running = false; }
