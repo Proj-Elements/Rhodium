@@ -195,7 +195,7 @@ describe("getMonthSummary", () => {
   it("queries DATE columns through the inclusive final day of the month", async () => {
     await getMonthSummary(MONTH);
 
-    const where = findTransactions.mock.calls[0][0]?.where as { occurredOn: { gte: Date; lt: Date }; deletedAt: null };
+    const where = findTransactions.mock.calls[0][0]?.where as { occurredOn: { gte: Date; lte: Date }; deletedAt: null };
     expect(where.deletedAt).toBeNull();
     expect(where.occurredOn.gte.toISOString()).toBe("2024-01-01T00:00:00.000Z");
     expect(where.occurredOn.lte.toISOString()).toBe("2024-01-31T00:00:00.000Z");
