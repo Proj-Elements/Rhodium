@@ -25,7 +25,7 @@ docker compose ps
 
 ## 配置
 
-- 应用没有登录鉴权，默认只绑定 `127.0.0.1:3030`。外部访问应通过经过认证的反向代理或可信 VPN，并显式配置 `RHODIUM_ALLOWED_HOSTS`。仅更改 `APP_BIND` 不会允许新的 Host。
+- 启动前需设置 `RHODIUM_ACCESS_TOKEN`（用 `openssl rand -hex 32` 生成）。浏览器用户名 `rhodium`、密码为令牌，Agent 使用 Bearer 认证。默认只绑定 `127.0.0.1:3030`；远程访问必须使用 HTTPS 并显式配置允许的 Host。
 - 代理应保留外部 Host。代理终止 TLS 时，可用 `RHODIUM_ALLOWED_ORIGINS=https://ledger.example` 声明同一 Host 的外部 Origin；Host 和端口必须精确一致。`cross-site`、`same-site` 浏览器请求仍被拒绝。
 - 默认忽略转发 IP。只有应用仅接收单一可信边缘代理的连接，且代理将整列 `X-Forwarded-For` 覆写为单个真实客户端 IP 时，才能设置 `RHODIUM_TRUST_PROXY=true`。逗号地址链不用于独立限流键。
 - 数据库默认绑定 `127.0.0.1:5432`，可用 `DB_BIND` 更改。应用通过 Compose 网络连接 `db`，无需开放数据库端口。

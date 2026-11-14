@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { checkRateLimit, type RateLimitRule } from "@/lib/rate-limit";
 import { rateLimitClientKey, requestSecurityError } from "@/lib/request-security";
+import { accessDecision } from "@/lib/access-control";
 
 /**
  * Generous ceilings: normal page loads fire a handful of requests, so these
@@ -11,7 +12,7 @@ const READ_RULE: RateLimitRule = { limit: 600, windowMs: 60_000 };
 const WRITE_RULE: RateLimitRule = { limit: 120, windowMs: 60_000 };
 const IMPORT_RULE: RateLimitRule = { limit: 12, windowMs: 60_000 };
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const error = requestSecurityError(request);
   if (error) return NextResponse.json({ error }, { status: 403, headers: { "Cache-Control": "no-store" } });
   const isRead = request.method === "GET" || request.method === "HEAD";
@@ -35,6 +36,11 @@ export function middleware(request: NextRequest) {
     );
   }
 
+  const access = await accessDecision(request);
+  if (access) return NextResponse.json({ error: access.message }, { status: access.status, headers: {
+    "Cache-Control": "no-store",
+    ...(access.status === 401 ? { "WWW-Authenticate": 'Basic realm="Rhodium", charset="UTF-8"' } : {}),
+  } });
   const response = NextResponse.next();
   response.headers.set("X-RateLimit-Limit", String(result.limit));
   response.headers.set("X-RateLimit-Remaining", String(result.remaining));
@@ -42,5 +48,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: "/api/:path*",
+  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
 };

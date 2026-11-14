@@ -19,6 +19,7 @@ import { expenseSharePercent } from "@/lib/category-breakdown";
 import { formatMoney } from "@/lib/domain";
 import { useToday } from "@/lib/use-today";
 import { useLedgerRevision } from "@/lib/ledger-events";
+import { useBudgetDraft } from "@/lib/use-budget-draft";
 import { CategoryDTO, DashboardDTO } from "@/lib/types";
 
 function formatShortDate(value: string) {
@@ -114,7 +115,8 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [showForm, setShowForm] = useState(false);
-  const [budgetInput, setBudgetInput] = useState("");
+  const budgetDraft = useBudgetDraft(data?.budgetVersion ?? "", month);
+  const { value: budgetInput, setValue: setBudgetInput } = budgetDraft;
   const [budgetSaving, setBudgetSaving] = useState(false);
   const { message, flash } = useFlash();
 
@@ -135,7 +137,6 @@ export default function DashboardPage() {
       success: ([dashboard, categoryResult]) => {
         setData(dashboard);
         setCategories(categoryResult.categories || []);
-        setBudgetInput("");
       },
       failure: setError,
       finished: () => setLoading(false),
@@ -148,13 +149,14 @@ export default function DashboardPage() {
 
   async function saveBudget() {
     if (!ready || data?.readOnly || budgetSaving) return;
+    if (budgetDraft.stale) { flash("预算已更新，请清空旧草稿后重新输入"); return; }
     if (!budgetInput.trim()) {
       flash("先输入一个预算金额");
       return;
     }
     setBudgetSaving(true);
     try {
-      await apiFetch(`/api/budgets/${month}`, { method: "PUT", json: { amount: budgetInput } });
+      await apiFetch(`/api/budgets/${month}`, { method: "PUT", json: { amount: budgetInput, expectedVersion: budgetDraft.version } });
       flash("预算已更新");
       setBudgetInput("");
       reload();
@@ -223,7 +225,7 @@ export default function DashboardPage() {
               </div>
             </section>
 
-            {showBudgetPrompt && writable && <Card className="panel flex flex-col flex-wrap justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="section-title">给这个月，划一个舒适的范围</h2><p className="section-description">设置预算后，就能随时看见剩余的可用金额。</p></div><form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void saveBudget(); }}><input className="ledger-field max-w-36 tabular-nums" aria-label="本月预算金额" inputMode="decimal" placeholder="例如 2000" value={budgetInput} onChange={(event) => setBudgetInput(event.target.value)} required /><Button type="submit" isPending={budgetSaving}>设置预算</Button></form></Card>}
+            {showBudgetPrompt && writable && <Card className="panel flex flex-col flex-wrap justify-between gap-4 sm:flex-row sm:items-center"><div><h2 className="section-title">给这个月，划一个舒适的范围</h2><p className="section-description">设置预算后，就能随时看见剩余的可用金额。</p></div><form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void saveBudget(); }}><input className="ledger-field max-w-36 tabular-nums" aria-label="本月预算金额" inputMode="decimal" placeholder="例如 2000" value={budgetInput} onChange={(event) => setBudgetInput(event.target.value)} required /><Button type="submit" isPending={budgetSaving} isDisabled={budgetDraft.stale}>设置预算</Button>{budgetDraft.stale && <Button variant="ghost" onPress={() => setBudgetInput("")}>清空旧草稿</Button>}</form></Card>}
             {!showBudgetPrompt && isOverBudget && <Alert status="warning"><Alert.Indicator /><Alert.Content><Alert.Title>预算已超出，先看见它</Alert.Title><Alert.Description>可以减少接下来的非必要花销，或到<Link href="/settings" className="ml-1 underline underline-offset-4">设置</Link>调整预算。</Alert.Description></Alert.Content></Alert>}
 
             <div className="grid gap-5 lg:grid-cols-12 reveal reveal-delay-1">

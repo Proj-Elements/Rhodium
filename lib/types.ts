@@ -38,6 +38,8 @@ export type DashboardDTO = {
   budget: { amountCents: number } | null;
   /** Where the effective budget comes from: explicit month row, preset, or unset. */
   budgetSource: "month" | "preset" | "none" | "settlement";
+  budgetVersion: string;
+  /** 账面支出，包含已报销的支出；与月度汇总口径一致。 */
   expenseCents: number;
   /** 本月未被报销的支出总额（报销属于回收，不算花掉）。 */
   outOfPocketCents: number;

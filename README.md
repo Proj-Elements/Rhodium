@@ -16,7 +16,7 @@ npm ci --ignore-scripts
 node node_modules/hpsetup/bin.js react --auto
 npx prisma generate
 cp .env.example .env
-# 编辑 .env，设置 POSTGRES_PASSWORD 和对应的本地 DATABASE_URL
+# 编辑 .env，设置 POSTGRES_PASSWORD、对应的本地 DATABASE_URL 和 RHODIUM_ACCESS_TOKEN
 # 本地 DATABASE_URL 中的密码需进行 URL 编码；Compose 会自动编码原始密码
 docker compose up -d db
 npx prisma migrate deploy
@@ -39,21 +39,22 @@ docker compose up -d --build
 
 ### 安全默认值
 
-本应用**不含任何登录与鉴权**，因此 compose 默认把两个端口都绑在回环地址上：
+应用采用共享令牌认证，compose 仍默认把两个端口都绑在回环地址上：
 
 | 变量 | 默认值 | 作用 |
 | --- | --- | --- |
 | `APP_BIND` | `127.0.0.1` | 应用 3030 端口的绑定地址 |
 | `DB_BIND` | `127.0.0.1` | Postgres 5432 端口的绑定地址 |
-| `POSTGRES_PASSWORD` | `yueyu_password` | 数据库原始口令，供 Postgres 初始化和应用连接使用 |
+| `POSTGRES_PASSWORD` | 必填，无默认值 | 数据库原始口令，供 Postgres 初始化和应用连接使用 |
+| `RHODIUM_ACCESS_TOKEN` | 必填，无默认值 | 32–256 位共享访问令牌，浏览器 Basic / Agent Bearer |
 | `RHODIUM_ALLOWED_HOSTS` | 仅本机地址 | 允许访问应用的主机名或 `主机:端口`，多个值用逗号分隔 |
 | `RHODIUM_ALLOWED_ORIGINS` | 请求主机的同源地址 | 额外允许的精确来源地址，多个值用逗号分隔 |
 | `RHODIUM_TRUST_PROXY` | `false` | 是否信任代理转发的客户端地址；仅在可信代理覆盖这些头时启用 |
 
-确认所在网络可信后再对外暴露，并务必覆盖默认口令：
+先在 `.env` 设置强口令和访问令牌；远程访问须通过 HTTPS 代理，并配置允许的 Host：
 
 ```bash
-POSTGRES_PASSWORD='强口令' APP_BIND=0.0.0.0 RHODIUM_ALLOWED_HOSTS=ledger.example.com docker compose up -d --build
+RHODIUM_ALLOWED_HOSTS=ledger.example.com RHODIUM_ALLOWED_ORIGINS=https://ledger.example.com docker compose up -d --build
 ```
 
 `POSTGRES_PASSWORD` 只在**首次**创建数据卷时用于初始化数据库；之后修改需同时更新数据库中的角色口令。
@@ -66,7 +67,9 @@ Compose 分别传递数据库地址、用户、库名和原始密码，应用容
 
 ## 安全边界
 
-**这是单人本地账本，服务端没有任何登录或鉴权：任何能访问端口的人都能读写、导出、清空全部账目。**
+**这是单人账本。除健康检查外，页面和 API 均要求访问令牌；它不提供多人账户或权限隔离。**
+
+首次运行前用 `openssl rand -hex 32` 生成 `RHODIUM_ACCESS_TOKEN`，通过 `.env` 或运行环境注入。浏览器用户名为 `rhodium`，密码是令牌；Agent 使用 `Authorization: Bearer <令牌>`。令牌缺失或格式无效时拒绝访问（503），错误凭据返回 401。远程连接必须使用 HTTPS，避免凭据明文传输。升级前需先配置令牌，否则新容器只提供健康检查。
 
 - 不要把 `3030` 或 `5432` 暴露到公网或不受信任的局域网；如需远程访问，请放在带认证的反向代理（或 VPN）之后。
 - `/api/*` 使用进程内固定窗口限流（读 600/分钟、写 120/分钟、导入 12/分钟），重启会重置计数，多实例不共享额度。默认不信任请求里的转发地址；它只用于限制失控的请求循环，不能代替认证。
@@ -125,4 +128,10 @@ npm run test:db -- tests/integration/budget.test.ts
 
 分支 push 初始化授权组件并保存 14 天构建产物。UI PR 仅使用本仓库、同一 CI 工作流成功 push，且来源为默认分支或当前 PR 精确 head SHA、锁文件 SHA256 完全匹配的组件产物；合并队列仅接受默认分支产物。缺少匹配产物时检查会明确失败，需要先完成相应 push。容器或任一 Compose 文件变更时，push 构建并启动容器，直接使用其中的生产构建；PR / 合并队列检查 Compose 配置并执行 Next.js 生产构建，不接收构建密钥。
 
-应用默认使用人民币、中文界面和 `Asia/Shanghai` 时区。首版是单人本地账本，不包含登录、多人共享、银行同步或多币种。
+应用默认使用人民币、中文界面和 `Asia/Shanghai` 时区。首版是使用共享令牌保护的单人账本，不包含多人账户、多人共享、银行同步或多币种。
+
+页面可见时每 15 秒检测账本变更序号，外部 Agent 和后台同步的写入会触发刷新；隐藏页面停止轮询。预算草稿绑定开始输入时的版本，后台刷新不会升级旧草稿，冲突时需明确清空后重新填写。
+
+总览与月度汇总的 `expenseCents` 统一表示账面支出（含报销），`outOfPocketCents` 表示自付额，预算仍按自付额计算。旧客户端若依赖总览旧字段的自付口径，应改读 `outOfPocketCents`。
+
+导出分批查询后写入私有临时文件，校验成功才返回下载。失败、取消、完成或两分钟无读取会清理文件；每进程最多两个导出，CSV 上限 256 MiB，JSON 保持恢复容量限制。运行用户需要可写临时目录，大数据量完整恢复请使用数据库备份。

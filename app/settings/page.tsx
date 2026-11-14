@@ -19,6 +19,7 @@ import { ImportPreviewStatus } from "@/components/import-preview-status";
 import { categoryIconLabels, categoryIconNames, isCategoryIconName, type CategoryIconName } from "@/lib/category-icons";
 import { CategoryDTO } from "@/lib/types";
 import { useLedgerRevision } from "@/lib/ledger-events";
+import { useBudgetDraft } from "@/lib/use-budget-draft";
 
 const fieldClassName = "ledger-field";
 
@@ -43,9 +44,6 @@ export default function SettingsPage() {
   const { message, flash } = useFlash();
 
   // Budget state
-  const [presetInput, setPresetInput] = useState("");
-  const [monthBudgetInput, setMonthBudgetInput] = useState("");
-  const [futureBudgetInput, setFutureBudgetInput] = useState("");
   const [budgetPresetCents, setBudgetPresetCents] = useState<number | null>(null);
   const [effectiveBudgetCents, setEffectiveBudgetCents] = useState<number | null>(null);
   const [currentMonthSource, setCurrentMonthSource] = useState<"month" | "preset" | "settlement" | "none">("none");
@@ -56,6 +54,13 @@ export default function SettingsPage() {
 
   const today = useToday();
   const currentMonth = today?.slice(0, 7) ?? "";
+  const presetDraft = useBudgetDraft(budgetVersions.preset, "preset");
+  const monthDraft = useBudgetDraft(budgetVersions.month, currentMonth);
+  const futureDraft = useBudgetDraft(budgetVersions.future, currentMonth);
+  const { value: presetInput, setValue: setPresetInput } = presetDraft;
+  const { value: monthBudgetInput, setValue: setMonthBudgetInput } = monthDraft;
+  const { value: futureBudgetInput, setValue: setFutureBudgetInput } = futureDraft;
+  const staleBudgetDraft = presetDraft.stale || monthDraft.stale || futureDraft.stale;
   const ready = isCurrentMonthReady(currentMonth, loadedMonth, loading, loadError);
   const currentMonthRef = useRef(currentMonth);
 
@@ -177,6 +182,7 @@ export default function SettingsPage() {
 
   async function savePreset() {
     if (!ready || budgetSaving) return;
+    if (presetDraft.stale) { flash("预算已更新，请清空旧草稿后重新输入"); return; }
     if (!presetInput.trim()) {
       flash("先输入默认预算金额");
       return;
@@ -185,7 +191,7 @@ export default function SettingsPage() {
     try {
       await apiFetch("/api/budgets/preset", {
         method: "PUT",
-        json: { amount: presetInput, expectedVersion: budgetVersions.preset },
+        json: { amount: presetInput, expectedVersion: presetDraft.version },
       });
       setPresetInput("");
       flash("默认预算已保存，之后每个月都会沿用");
@@ -199,6 +205,7 @@ export default function SettingsPage() {
 
   async function saveCurrentMonthBudget() {
     if (!ready || budgetSaving || currentMonthReadOnly) return;
+    if (monthDraft.stale) { flash("预算已更新，请清空旧草稿后重新输入"); return; }
     if (!monthBudgetInput.trim()) {
       flash("先输入本月预算金额");
       return;
@@ -207,7 +214,7 @@ export default function SettingsPage() {
     try {
       const result = await apiFetch<{ budget: { amountCents: number } }>(
         `/api/budgets/${currentMonth}`,
-        { method: "PUT", json: { amount: monthBudgetInput, expectedVersion: budgetVersions.month } },
+        { method: "PUT", json: { amount: monthBudgetInput, expectedVersion: monthDraft.version } },
       );
       setEffectiveBudgetCents(result.budget.amountCents);
       setCurrentMonthSource("month");
@@ -223,6 +230,7 @@ export default function SettingsPage() {
 
   async function saveFutureBudgets() {
     if (!ready || budgetSaving) return;
+    if (futureDraft.stale) { flash("预算已更新，请清空旧草稿后重新输入"); return; }
     if (!futureBudgetInput.trim()) {
       flash("先输入以后的每月预算金额");
       return;
@@ -231,7 +239,7 @@ export default function SettingsPage() {
     try {
       const result = await apiFetch<{ budget: { amountCents: number } }>(
         `/api/budgets/${currentMonth}?scope=future`,
-        { method: "PUT", json: { amount: futureBudgetInput, expectedVersion: budgetVersions.future } },
+        { method: "PUT", json: { amount: futureBudgetInput, expectedVersion: futureDraft.version } },
       );
       setEffectiveBudgetCents(result.budget.amountCents);
       setCurrentMonthSource("month");
@@ -289,6 +297,7 @@ export default function SettingsPage() {
             <div className="section-heading"><div><h2 className="section-title">预算，给生活一点方向</h2><p className="section-description">合理的预算不是限制，而是花钱时的底气。</p></div><span className="metric-icon"><Icon name="target" size={18} /></span></div>
             <div className="settings-row"><div className="settings-copy"><h3>每月默认预算</h3><p>没有单独设定预算的月份，将自动沿用这个金额。<br />当前预设：<b className="font-medium tabular-nums text-foreground">{loading ? "读取中…" : presetDisplay}</b></p></div><form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void savePreset(); }}><Input className={`${fieldClassName} max-w-32 tabular-nums`} aria-label="每月默认预算金额" inputMode="decimal" placeholder="输入金额" value={presetInput} onChange={(event) => setPresetInput(event.target.value)} disabled={!ready || budgetSaving} required /><Button type="submit" variant="outline" isPending={budgetSaving} isDisabled={!ready}>{budgetPresetCents === null ? "设置" : "更新"}</Button></form></div>
             <div className="settings-row"><div className="settings-copy"><h3>只调整这个月 <span className="ml-1 text-[11px] font-normal tabular-nums text-muted">{currentMonth}</span></h3><p>当前生效：<b className="font-medium tabular-nums text-foreground">{loading ? "读取中…" : currentMonthDisplay}</b>{currentMonthSource === "preset" ? "（沿用默认预算）" : currentMonthSource === "month" ? "（本月单独设置）" : currentMonthSource === "settlement" ? "（结算快照）" : ""}<br />{currentMonthReadOnly ? "本月已结算，重新打开后才能调整。" : "只对本月生效，不影响其他月份。"}</p></div><form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); void saveCurrentMonthBudget(); }}><Input className={`${fieldClassName} max-w-32 tabular-nums`} aria-label="本月预算金额" inputMode="decimal" placeholder="输入金额" value={monthBudgetInput} onChange={(event) => setMonthBudgetInput(event.target.value)} disabled={!ready || budgetSaving || currentMonthReadOnly} required /><Button type="submit" variant="outline" isPending={budgetSaving} isDisabled={!ready || currentMonthReadOnly}>调整</Button></form></div>
+            {staleBudgetDraft && <p role="status" className="mt-3 text-xs text-warning">预算已在别处更新，旧草稿尚未提交。<Button variant="ghost" size="sm" onPress={() => { setPresetInput(""); setMonthBudgetInput(""); setFutureBudgetInput(""); setConfirmFuture(false); }}>清空旧预算草稿</Button></p>}
             <details className="mt-5 border-t border-separator pt-5"><summary className="flex cursor-[var(--cursor-interactive)] list-none items-center justify-between gap-3 rounded-md text-xs text-muted focus-visible:outline-2 focus-visible:outline-focus">批量调整本月及以后的预算<Icon name="chevron" size={14} /></summary><div className="mt-5"><p className="mb-4 text-xs leading-6 text-muted">从 {currentMonth} 起，一次性设置未来 20 年内的月度预算，已结算的月份不会更改。</p><form className="flex flex-wrap items-center gap-3" onSubmit={(event) => { event.preventDefault(); if (ready && !budgetSaving && futureBudgetInput.trim()) setConfirmFuture(true); }}><Input className={`${fieldClassName} max-w-44 tabular-nums`} inputMode="decimal" aria-label="以后每月预算金额" placeholder="新的每月预算" value={futureBudgetInput} onChange={(event) => setFutureBudgetInput(event.target.value)} disabled={!ready || budgetSaving} required /><Button type="submit" variant="outline" isDisabled={!ready || budgetSaving}>应用到以后</Button></form></div></details>
           </Card>
 
@@ -356,7 +365,7 @@ export default function SettingsPage() {
             {importError && <p role="alert" className="mt-4 text-xs leading-6 text-danger">{importError}</p>}
             <p className="mt-4 text-[10px] leading-5 text-muted">CSV 作为新账目追加；恢复完整账本请使用 JSON 备份。文件与请求最多 64 MiB。完整备份一次性恢复，校验失败时不写入任何数据。</p>
           </Card>
-          <p className="flex items-start gap-2 px-2 text-[10px] leading-5 text-muted"><span className="mt-1 shrink-0"><Icon name="shield" size={13} /></span>这是一个单人账本，不含登录鉴权。请仅在本机或可信网络中使用。</p>
+          <p className="flex items-start gap-2 px-2 text-[10px] leading-5 text-muted"><span className="mt-1 shrink-0"><Icon name="shield" size={13} /></span>这是使用共享令牌保护的单人账本。请保管好访问凭据，远程连接须使用 HTTPS。</p>
         </div>
       </div>
       </SettingsDataBoundary>

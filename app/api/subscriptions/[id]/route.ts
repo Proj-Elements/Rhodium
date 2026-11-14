@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handleApiError, parseJsonBody } from "@/lib/api";
+import { assertValidText, handleApiError, parseJsonBody } from "@/lib/api";
 import { badRequest, conflict, notFound } from "@/lib/errors";
 import { withLedgerWrite } from "@/lib/ledger-write";
 import { subscriptionEditSchema, subscriptionToggleSchema } from "@/lib/validation";
@@ -15,6 +15,7 @@ type Context = { params: Promise<{ id: string }> };
 export async function PATCH(request: Request, { params }: Context) {
   try {
     const { id } = await params;
+    assertValidText(id);
     const body = await parseJsonBody(request);
     const toggle = subscriptionToggleSchema.safeParse(body);
     const parsed = toggle.success ? null : subscriptionEditSchema.parse(body);
@@ -56,6 +57,7 @@ export async function PATCH(request: Request, { params }: Context) {
 export async function DELETE(request: Request, { params }: Context) {
   try {
     const { id } = await params;
+    assertValidText(id);
     const expectedVersion = new URL(request.url).searchParams.get("expectedVersion") ?? "";
     if (!/^[1-9]\d*$/.test(expectedVersion)) throw badRequest("删除固定支出需要有效的 expectedVersion");
     // All sync writers hold this same lock, so usage cannot appear between the

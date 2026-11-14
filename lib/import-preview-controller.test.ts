@@ -9,7 +9,7 @@ function deferred<T>() {
 
 const preview: ImportPreview = { total: 1, valid: 1, errors: [] };
 function file(name: string, text: string | Promise<string> = '{"rows":[{"note":"example"}]}') {
-  return { name, text: () => Promise.resolve(text) };
+  return { name, size: 0, arrayBuffer: async () => new TextEncoder().encode(await text).buffer as ArrayBuffer };
 }
 
 function setup(request = vi.fn(async () => preview)) {
@@ -20,6 +20,20 @@ function setup(request = vi.fn(async () => preview)) {
 
 // Real deferred file reads and preview responses, not implementation-text checks.
 describe("import preview selection", () => {
+  it("rejects oversized files before reading or allocating their contents", async () => {
+    const { controller, state, request } = setup();
+    const arrayBuffer = vi.fn();
+    await controller.select({ name: "huge.json", size: 64 * 1024 * 1024 + 1, arrayBuffer });
+    expect(arrayBuffer).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+    expect(state()).toMatchObject({ status: "error" });
+  });
+  it("rejects malformed UTF-8 instead of submitting replacement characters", async () => {
+    const { controller, state, request } = setup();
+    await controller.select(new File([new Uint8Array([0xff])], "bad.csv"));
+    expect(state()).toMatchObject({ status: "error" });
+    expect(request).not.toHaveBeenCalled();
+  });
   it("invalidates a previously ready selection immediately when another file is selected", async () => {
     const { controller, state } = setup();
     await controller.select(file("first.json"));

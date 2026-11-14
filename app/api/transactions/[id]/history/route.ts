@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { handleApiError } from "@/lib/api";
+import { assertValidText, handleApiError } from "@/lib/api";
 import { notFound } from "@/lib/errors";
 import { withLedgerRead } from "@/lib/ledger-write";
 import { historyPage } from "@/lib/history-page";
@@ -11,6 +11,7 @@ type Context = { params: Promise<{ id: string }> };
 export async function GET(request: Request, { params }: Context) {
   try {
     const { id } = await params;
+    assertValidText(id);
     const { limit, cursor } = historyPage(request);
     const history = await withLedgerRead(async (tx) => {
       if (!await tx.transaction.findUnique({ where: { id }, select: { id: true } })) throw notFound("账目不存在");

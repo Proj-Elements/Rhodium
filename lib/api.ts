@@ -38,6 +38,13 @@ function tooLargeMessage(maxBytes: number): string {
   return `请求体过大，最多 ${Math.round(maxBytes / 1024)} KB`;
 }
 
+/** PostgreSQL text/JSONB cannot preserve NUL or isolated UTF-16 surrogates. */
+export function assertValidText(...values: (string | null)[]): void {
+  if (values.some((value) => value !== null && /[\u0000\uD800-\uDFFF]/u.test(value))) {
+    throw new AppError("文本不能包含空字符或无效 Unicode 字符", 400);
+  }
+}
+
 export async function parseJsonBody(request: Request, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
   const mediaType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   if (mediaType !== "application/json") throw new AppError("请求体必须使用 application/json", 415);
@@ -67,16 +74,20 @@ export async function parseJsonBody(request: Request, maxBytes = MAX_BODY_BYTES)
   } finally {
     reader?.releaseLock();
   }
-  const text = Buffer.concat(chunks, received).toString("utf8");
   try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    throw new AppError("请求体不是有效 JSON", 400);
+    const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks, received));
+    return JSON.parse(text, (key, value: unknown) => {
+      assertValidText(key, typeof value === "string" ? value : null);
+      return value;
+    }) as unknown;
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw new AppError("请求体不是有效 UTF-8 JSON", 400);
   }
 }
 
 /**
- * Shared [start, nextStart) half-open range for a YYYY-MM month.
+ * Calendar month bounds. Query DATE columns with inclusive end (Prisma truncates time).
  * Replaces the hand-rolled "end + 1 day" math repeated across routes.
  */
 export function monthRange(month: string) {

@@ -7,6 +7,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+/// Monotonic, transactionally updated signal for changes made by other clients.
+model LedgerRevision {
+  id       Int    @id @default(1)
+  revision BigInt @default(0)
+}
+
 enum TransactionType {
   EXPENSE
   INCOME

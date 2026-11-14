@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { startLedgerPolling } from "@/lib/ledger-poll";
 
 const ledgerUpdatedEvent = "rhodium:ledger-updated";
 
@@ -30,7 +31,20 @@ export function useLedgerRevision(): number {
     window.addEventListener("storage", storageRefresh);
     window.addEventListener("focus", refresh);
     document.addEventListener("visibilitychange", visibilityRefresh);
+    const stopPolling = startLedgerPolling({
+      visible: () => document.visibilityState === "visible",
+      changed: refresh,
+      read: async (signal) => {
+        const timeout = AbortSignal.timeout(10_000);
+        const response = await fetch("/api/revision", { signal: AbortSignal.any([signal, timeout]), cache: "no-store" });
+        if (!response.ok) throw new Error("Revision unavailable");
+        const payload = await response.json();
+        if (typeof payload.revision !== "string") throw new Error("Invalid revision");
+        return payload.revision;
+      },
+    });
     return () => {
+      stopPolling();
       channel?.close();
       window.removeEventListener(ledgerUpdatedEvent, refresh);
       window.removeEventListener("storage", storageRefresh);
