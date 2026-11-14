@@ -66,6 +66,12 @@ describe("local API request boundary", () => {
     expect((await protectedMiddleware(new NextRequest("http://ledger.example/api/categories", { headers: { host: "ledger.example", origin: "https://ledger.example" } }))).headers.get("x-middleware-next")).toBe("1");
     expect((await protectedMiddleware(new NextRequest("http://evil.example/api/categories", { headers: { "x-forwarded-host": "ledger.example" } }))).status).toBe(403);
   });
+
+  it("isolates the public health-probe quota from authenticated ledger reads", async () => {
+    for (let index = 0; index < 600; index++) await middleware(new NextRequest("http://localhost/api/health"));
+    expect((await middleware(new NextRequest("http://localhost/api/health"))).status).toBe(429);
+    expect((await protectedMiddleware(new NextRequest("http://localhost/api/revision"))).headers.get("x-middleware-next")).toBe("1");
+  });
 });
 
 describe("rate-limit proxy trust", () => {

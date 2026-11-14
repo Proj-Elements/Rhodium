@@ -44,4 +44,19 @@ describe("recoverable backup contract", () => {
     expect(backupSchema.safeParse({ transactions: [{ ...row, version: 1 }], transactionHistory: [{ ...history, version: 2, after: { id: row.id, version: 2 } }] }).success).toBe(false);
     expect(backupSchema.safeParse({ creationRequests: [{ key: "key", requestHash: "hash", createdAt: history.recordedAt }] }).success).toBe(false);
   });
+
+  it("bounds validation work and diagnostics for a large malformed archive", () => {
+    const result = backupSchema.safeParse({ transactions: Array.from({ length: 10_000 }, () => ({})) });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.length).toBeLessThanOrEqual(50);
+      expect(result.error.issues[0].path).toEqual(["transactions", 0, "id"]);
+    }
+  });
+
+  it("requires a compatible update timestamp when creation is in the future", () => {
+    const category = { id: "future", name: "未来创建", createdAt: "2099-01-01T00:00:00Z" };
+    expect(backupSchema.safeParse({ categories: [category] }).success).toBe(false);
+    expect(backupSchema.safeParse({ categories: [{ ...category, updatedAt: category.createdAt }] }).success).toBe(true);
+  });
 });

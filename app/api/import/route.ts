@@ -25,6 +25,7 @@ import { invalidateSubscriptionSyncCache } from "@/lib/subscriptions";
 import { indexImportCategories, rememberImportCategory, resolveBackupCategory, resolveImportCategory } from "@/lib/import-categories";
 import { importSchema, type BackupPayload } from "@/lib/backup-validation";
 import { CategoryType, Prisma, TransactionType, type Category } from "@prisma/client";
+import { withImportRequest } from "@/lib/import-request";
 
 export const dynamic = "force-dynamic";
 
@@ -265,7 +266,7 @@ function usableFor(category: Category | undefined, wanted: CategoryType, allowAr
   return category.type === wanted || category.type === CategoryType.BOTH ? category : undefined;
 }
 
-export async function POST(request: Request) {
+const handleImport = withImportRequest(async (request: Request) => {
   try {
     const body = importSchema.parse(await parseJsonBody(request, MAX_IMPORT_BODY_BYTES));
 
@@ -430,4 +431,8 @@ export async function POST(request: Request) {
   } catch (error) {
     return handleApiError(error);
   }
+});
+
+export async function POST(request: Request) {
+  return handleImport(request);
 }

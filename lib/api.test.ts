@@ -34,6 +34,10 @@ describe("parseJsonBody", () => {
     await expect(parseJsonBody(jsonRequest("{not json"))).rejects.toMatchObject({ status: 400 });
   });
 
+  it("rejects JSON number overflow before nested schema validation", async () => {
+    await expect(parseJsonBody(jsonRequest('{"ignored":{"amount":1e400}}'))).rejects.toMatchObject({ status: 400 });
+  });
+
   it("rejects invalid UTF-8 instead of silently changing imported text", async () => {
     const body = Buffer.concat([Buffer.from('{"note":"'), Buffer.from([0xff]), Buffer.from('"}')]);
     const request = new Request("http://localhost/api/test", { method: "POST", headers: { "content-type": "application/json" }, body });
@@ -93,6 +97,20 @@ describe("parseJsonBody", () => {
       status: 413,
     });
   });
+
+  it("cancels stalled uploads rather than retaining the reader indefinitely", async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn();
+    const body = new ReadableStream<Uint8Array>({ cancel });
+    const request = new Request("http://localhost/api/import", { method: "POST", headers: { "content-type": "application/json" }, body, duplex: "half" } as RequestInit);
+    const parsed = expect(parseJsonBody(request, MAX_BODY_BYTES, 100)).rejects.toMatchObject({ status: 408 });
+    try {
+      await vi.advanceTimersByTimeAsync(100);
+      await parsed;
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(body.locked).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 afterEach(() => {
@@ -108,6 +126,14 @@ describe("jsonError", () => {
 });
 
 describe("handleApiError", () => {
+  it("caps the serialized diagnostics even for a large externally supplied Zod error", async () => {
+    const invalid = z.array(z.string()).safeParse(Array.from({ length: 10_000 }, () => null));
+    expect(invalid.success).toBe(false);
+    if (!invalid.success) {
+      const response = handleApiError(invalid.error);
+      expect((await response.text()).length).toBeLessThan(10_000);
+    }
+  });
   it.each([
     [badRequest("请选择有效的分类"), 400, "请选择有效的分类"],
     [conflict("本月已经结算，请先重新打开本月"), 409, "本月已经结算，请先重新打开本月"],

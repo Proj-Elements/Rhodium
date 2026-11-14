@@ -7,11 +7,11 @@ import { POST as settleMonth } from "@/app/api/settlements/[month]/settle/route"
 import { monthStart, parseDateOnly } from "@/lib/domain";
 import { transactionSnapshot } from "@/lib/transaction-history";
 import { serializeSettlement } from "@/lib/serializers";
-import { prisma, resetDatabase, routeContext } from "./helpers";
+import { authenticatedHeaders, prisma, resetDatabase, routeContext } from "./helpers";
 
 function importRequest(backup: Record<string, unknown>, rows: unknown[] = []) {
   return new Request("http://localhost/api/import", {
-    method: "POST", headers: { "content-type": "application/json" },
+    method: "POST", headers: authenticatedHeaders(),
     body: JSON.stringify({ backup: { ...backup, ...(rows.length ? { transactions: rows } : {}) } }),
   });
 }
@@ -25,6 +25,19 @@ async function exportBackup() {
 beforeEach(resetDatabase);
 
 describe("lossless JSON backup restore", () => {
+  it("does not create an unexportable record from a future creation stamp without an update stamp", async () => {
+    const backup = { categories: [{ id: "future-created", name: "未来创建", createdAt: "2099-01-01T00:00:00Z" }] };
+    expect((await importLedger(importRequest(backup))).status).toBe(400);
+    expect(await prisma.category.count()).toBe(0);
+    expect((await exportBackup()).categories).toEqual([]);
+  });
+  it.each(["0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00"])("rejects UTC-overflowing metadata without poisoning later backups: %s", async (createdAt) => {
+    const backup = { categories: [{ id: "overflow-date", name: "时间边界", type: "EXPENSE", createdAt }] };
+    expect((await previewImport(importRequest(backup))).status).toBe(400);
+    expect((await importLedger(importRequest(backup))).status).toBe(400);
+    expect(await prisma.category.count()).toBe(0);
+    expect((await exportBackup()).categories).toEqual([]);
+  });
   it("can recover long notes written by legacy row imports", async () => {
     const category = await prisma.category.create({ data: { name: "旧备注" } });
     await prisma.transaction.create({ data: { type: "EXPENSE", categoryId: category.id, amountCents: 100, occurredOn: monthStart("2024-05"), note: "测".repeat(201) } });
@@ -32,6 +45,17 @@ describe("lossless JSON backup restore", () => {
     await resetDatabase();
     expect((await importLedger(importRequest(backup, backup.transactions))).status).toBe(200);
     expect((await prisma.transaction.findFirstOrThrow()).note).toBe("测".repeat(201));
+  });
+
+  it("bounds preview samples while retaining complete legacy notes in the restore", async () => {
+    const category = await prisma.category.create({ data: { name: "长备注预览" } });
+    const note = "历史".repeat(10_000);
+    const backup = { transactions: [{ id: "long-preview", categoryId: category.id, type: "EXPENSE", amountCents: 100, occurredOn: "2024-05-01", note }] };
+    const preview = await previewImport(importRequest(backup));
+    expect(preview.status).toBe(200);
+    expect((await preview.json()).preview[0].note).toBe(note.slice(0, 200));
+    expect((await importLedger(importRequest(backup))).status).toBe(200);
+    expect((await prisma.transaction.findUniqueOrThrow({ where: { id: "long-preview" } })).note).toBe(note);
   });
   it.each([0, 150_000])("round-trips the default budget %i into an empty ledger", async (amountCents) => {
     await prisma.budgetPreset.create({ data: { id: 1, amountCents } });
@@ -167,7 +191,7 @@ describe("lossless JSON backup restore", () => {
       budgets: [{ month: "2024-05-01", amountCents: 1000 }],
       settlements: [{ month: "2024-05-01", budgetAmountCents: 1000, expenseAmountCents: 100, incomeAmountCents: 0, remainingAmountCents: 900 }],
     };
-    const preview = await previewImport(new Request("http://localhost/api/import/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ backup }) }));
+    const preview = await previewImport(new Request("http://localhost/api/import/preview", { method: "POST", headers: authenticatedHeaders(), body: JSON.stringify({ backup }) }));
     expect(preview.status).toBe(200);
     expect((await preview.json()).summary.conflicts[0]).toContain("结算与合并后的账目不一致");
     const response = await importLedger(importRequest(backup));

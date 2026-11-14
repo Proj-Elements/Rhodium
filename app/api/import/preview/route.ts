@@ -4,10 +4,11 @@ import { importSchema } from "@/lib/backup-validation";
 import { normalizeRow, type NormalizedRow } from "@/lib/import-parser";
 import { summarizeImport } from "@/lib/import-summary";
 import { prisma } from "@/lib/prisma";
+import { withImportRequest } from "@/lib/import-request";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(request: Request) {
+const handlePreview = withImportRequest(async (request: Request) => {
   try {
     const body = importSchema.parse(await parseJsonBody(request, MAX_IMPORT_BODY_BYTES));
     const errors: string[] = [];
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
       try {
         const parsed = normalizeRow(row, Boolean(body.backup));
         normalized.push(parsed);
-        return index < 20 ? { index, date: parsed.occurredOn.toISOString().slice(0, 10), amount: (parsed.amountCents / 100).toFixed(2), note: parsed.note ?? "" } : null;
+        return index < 20 ? { index, date: parsed.occurredOn.toISOString().slice(0, 10), amount: (parsed.amountCents / 100).toFixed(2), note: parsed.note?.slice(0, 200) ?? "" } : null;
       } catch (error) {
         invalid += 1;
         if (errors.length < 50) errors.push(`第 ${index + 1} 行：${error instanceof Error ? error.message : "格式错误"}`);
@@ -33,4 +34,8 @@ export async function POST(request: Request) {
   } catch (error) {
     return handleApiError(error);
   }
+});
+
+export async function POST(request: Request) {
+  return handlePreview(request);
 }

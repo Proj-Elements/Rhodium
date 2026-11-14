@@ -1,17 +1,16 @@
-import type { NextRequest } from "next/server";
-
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
 function configuredValues(name: string): string[] {
   return (process.env[name] ?? "").split(",").map((value) => value.trim()).filter(Boolean);
 }
 
-export function requestSecurityError(request: NextRequest): string | null {
-  const host = request.headers.get("host") || request.nextUrl.host;
+export function requestSecurityError(request: Request): string | null {
+  const requestUrl = new URL(request.url);
+  const host = request.headers.get("host") || requestUrl.host;
   let target: URL;
   try {
     if (!/^[a-z\d.[\]:-]+$/i.test(host)) return "请求的主机地址无效";
-    target = new URL(`${request.nextUrl.protocol}//${host}`);
+    target = new URL(`${requestUrl.protocol}//${host}`);
     if (target.username || target.password || target.pathname !== "/" || target.search || target.hash) {
       return "请求的主机地址无效";
     }
@@ -59,7 +58,7 @@ function validClientIp(value: string): boolean {
   }
 }
 
-export function rateLimitClientKey(request: NextRequest): string {
+export function rateLimitClientKey(request: Request): string {
   if (process.env.RHODIUM_TRUST_PROXY !== "true") return "local";
   const forwarded = request.headers.get("x-forwarded-for")?.trim().toLowerCase();
   return forwarded && validClientIp(forwarded) ? forwarded : "local";

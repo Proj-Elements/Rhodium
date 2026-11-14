@@ -126,6 +126,15 @@ describe("import validation helpers", () => {
     expect(optionalDateTime("2025-09-02T08:00:00+08:00", "时间")?.toISOString()).toBe("2025-09-02T00:00:00.000Z");
   });
 
+  it.each(["0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00"])("rejects timestamps whose UTC year leaves the backup domain: %s", (timestamp) => {
+    expect(() => optionalDateTime(timestamp, "时间")).toThrow("时间格式不正确");
+  });
+
+  it("preserves valid offset conversions at both supported year boundaries", () => {
+    expect(optionalDateTime("0001-01-01T01:00:00+01:00", "时间")?.toISOString()).toBe("0001-01-01T00:00:00.000Z");
+    expect(optionalDateTime("9999-12-31T22:59:59-01:00", "时间")?.toISOString()).toBe("9999-12-31T23:59:59.000Z");
+  });
+
   it("requires subscription and metadata months to be exact month values", () => {
     expect(parseMonthValue("2025-09", "月份").toISOString()).toBe("2025-09-01T00:00:00.000Z");
     expect(parseMonthValue("2025-09-01", "月份").toISOString()).toBe("2025-09-01T00:00:00.000Z");
