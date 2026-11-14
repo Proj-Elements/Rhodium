@@ -15,12 +15,12 @@ import { POST as importLedger } from "@/app/api/import/route";
 import { GET as exportLedger } from "@/app/api/export/route";
 import { addMonths, todayInShanghai } from "@/lib/domain";
 import { ensureDefaultCategories, resetSeedCache } from "@/lib/seed";
-import { createCategory, prisma, resetDatabase, routeContext } from "./helpers";
+import { authenticatedHeaders, createCategory, prisma, resetDatabase, routeContext } from "./helpers";
 
 const month = "2024-03";
 const context = routeContext({ month });
 function request(body: unknown, method = "POST", key?: string) {
-  return new Request("http://localhost/api/audit", { method, headers: { "content-type": "application/json", ...(key ? { "idempotency-key": key } : {}) }, body: JSON.stringify(body) });
+  return new Request("http://localhost/api/audit", { method, headers: { ...authenticatedHeaders(), ...(key ? { "idempotency-key": key } : {}) }, body: JSON.stringify(body) });
 }
 const read = () => new Request("http://localhost");
 const transactionInput = (categoryId: string) => ({ type: "expense", amount: "10", categoryId, occurredOn: `${month}-05` });

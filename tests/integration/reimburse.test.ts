@@ -10,13 +10,13 @@ import { GET as listTransactions, POST as createTransaction } from "@/app/api/tr
 import { DELETE as deleteTransactionRoute, PATCH as patchTransactionRoute } from "@/app/api/transactions/[id]/route";
 import { monthStart } from "@/lib/domain";
 import { getMonthSummary } from "@/lib/summary";
-import { createCategory, prisma, resetDatabase, routeContext } from "./helpers";
+import { authenticatedHeaders, createCategory, prisma, resetDatabase, routeContext } from "./helpers";
 const MONTH = "2024-03";
 
 function jsonRequest(url: string, method: string, body: unknown) {
   return new Request(url, {
     method,
-    headers: { "content-type": "application/json" },
+    headers: authenticatedHeaders(),
     body: JSON.stringify(body),
   });
 }

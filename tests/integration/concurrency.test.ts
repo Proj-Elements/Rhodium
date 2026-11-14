@@ -12,7 +12,7 @@ import { getMonthSummary } from "@/lib/summary";
 import { subscriptionPlanData, syncSubscriptions } from "@/lib/subscriptions";
 import { initialBillingHistory } from "@/lib/billing-history";
 import { budgetVersion } from "@/lib/budget-version";
-import { addTransaction, createCategory, prisma, resetDatabase, routeContext } from "./helpers";
+import { authenticatedHeaders, addTransaction, createCategory, prisma, resetDatabase, routeContext } from "./helpers";
 
 function deferred() {
   let resolve!: () => void;
@@ -45,7 +45,7 @@ afterEach(() => {
 function request(path: string, method: string, body?: unknown) {
   return new Request(`http://localhost${path}`, {
     method,
-    ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+    ...(body === undefined ? {} : { headers: authenticatedHeaders(), body: JSON.stringify(body) }),
   });
 }
 

@@ -8,17 +8,42 @@ import { GET as transactions } from "@/app/api/transactions/route";
 import { GET as transactionHistory } from "@/app/api/transactions/[id]/history/route";
 import { PATCH as patchCategory } from "@/app/api/categories/[id]/route";
 import { PATCH as patchSubscription, DELETE as removeSubscription } from "@/app/api/subscriptions/[id]/route";
+import { POST as importLedger } from "@/app/api/import/route";
+import { POST as reopen } from "@/app/api/settlements/[month]/reopen/route";
+import { POST as settle } from "@/app/api/settlements/[month]/settle/route";
 import { getMonthSummary, getMonthSummaries } from "@/lib/summary";
 import { withLedgerWrite } from "@/lib/ledger-write";
-import { createCategory, prisma, resetDatabase, routeContext } from "./helpers";
+import { authenticatedHeaders, createCategory, prisma, resetDatabase, routeContext } from "./helpers";
 
 const request = (path: string, method = "GET", body?: unknown) => new Request(`http://localhost${path}`, {
-  method, ...(body === undefined ? {} : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
+  method, ...(body === undefined ? {} : { headers: authenticatedHeaders(), body: JSON.stringify(body) }),
 });
 const observedRevision = async () => BigInt((await (await revision()).json()).revision);
 beforeEach(resetDatabase);
 
 describe("risk hardening regressions", () => {
+  it("returns a conflict and preserves imported transactions at the version ceiling", async () => {
+    const category = await createCategory("版本上限");
+    const archived = { id: "max-version", categoryId: category.id, type: "EXPENSE", amountCents: 100, occurredOn: "2024-05-01", version: 2_147_483_647 };
+    expect((await importLedger(request("/api/import", "POST", { backup: { transactions: [archived] } }))).status).toBe(200);
+    const context = routeContext({ id: archived.id });
+    expect((await patch(request("/api/transactions/id", "PATCH", { reimburse: true, expectedVersion: archived.version }), context)).status).toBe(409);
+    expect((await patch(request("/api/transactions/id", "PATCH", { type: "expense", amount: "2", occurredOn: archived.occurredOn, categoryId: category.id, expectedVersion: archived.version }), context)).status).toBe(409);
+    expect((await remove(request(`/api/transactions/id?expectedVersion=${archived.version}`, "DELETE"), context)).status).toBe(409);
+    expect(await prisma.transaction.findUnique({ where: { id: archived.id } })).toMatchObject({ amountCents: 100, version: archived.version, deletedAt: null, reimbursedAt: null });
+    expect(await prisma.transactionHistory.count()).toBe(0);
+  });
+
+  it("returns a conflict for a saturated settlement revision, including re-settlement", async () => {
+    const month = "2024-05";
+    expect((await importLedger(request("/api/import", "POST", { backup: { settlements: [{ month: `${month}-01`, budgetAmountCents: 0, expenseAmountCents: 0, incomeAmountCents: 0, revision: 2_147_483_647 }] } }))).status).toBe(200);
+    const context = routeContext({ month });
+    expect((await reopen(request(`/api/settlements/${month}/reopen`, "POST", { expectedVersion: 2_147_483_647 }), context)).status).toBe(409);
+    expect((await settle(request(`/api/settlements/${month}/settle`, "POST"), context)).status).toBe(200);
+    await prisma.monthlySettlement.update({ where: { month: new Date(`${month}-01T00:00:00Z`) }, data: { reopenedAt: new Date() } });
+    expect((await settle(request(`/api/settlements/${month}/settle`, "POST"), context)).status).toBe(409);
+    expect(await prisma.settlementHistory.count()).toBe(0);
+  });
   it.each(["q", "categoryId", "cursor"])("rejects NUL in %s before querying PostgreSQL", async (key) => {
     expect((await transactions(request(`/api/transactions?${key}=%00`))).status).toBe(400);
   });

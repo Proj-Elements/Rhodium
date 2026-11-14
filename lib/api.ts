@@ -13,7 +13,7 @@ export function handleApiError(error: unknown) {
     return jsonError(error.message, error.status);
   }
   if (error instanceof ZodError) {
-    return jsonError("请求参数不完整或格式不正确", 400, flattenError(error));
+    return jsonError("请求参数不完整或格式不正确", 400, flattenError(new ZodError(error.issues.slice(0, 50))));
   }
   if (error instanceof Prisma.PrismaClientKnownRequestError) {
     if (error.code === "P2025") return jsonError("请求的数据不存在", 404);
@@ -45,7 +45,7 @@ export function assertValidText(...values: (string | null)[]): void {
   }
 }
 
-export async function parseJsonBody(request: Request, maxBytes = MAX_BODY_BYTES): Promise<unknown> {
+export async function parseJsonBody(request: Request, maxBytes = MAX_BODY_BYTES, timeoutMs = 30_000): Promise<unknown> {
   const mediaType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
   if (mediaType !== "application/json") throw new AppError("请求体必须使用 application/json", 415);
   const declared = Number(request.headers.get("content-length"));
@@ -55,29 +55,36 @@ export async function parseJsonBody(request: Request, maxBytes = MAX_BODY_BYTES)
   const chunks: Uint8Array[] = [];
   let received = 0;
   const reader = request.body?.getReader();
+  let expiry: ReturnType<typeof setTimeout> | undefined;
   try {
     if (reader) {
+      // A client that stops uploading must not hold the import slot forever.
+      const timeout = new Promise<never>((_, reject) => {
+        expiry = setTimeout(() => reject(new AppError("读取请求体超时，请重新上传", 408)), timeoutMs);
+      });
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await Promise.race([reader.read(), timeout]);
         if (done) break;
         received += value.byteLength;
         if (received > maxBytes) {
-          await reader.cancel().catch(() => undefined);
           throw new AppError(tooLargeMessage(maxBytes), 413);
         }
         chunks.push(value);
       }
     }
   } catch (error) {
+    void reader?.cancel().catch(() => undefined);
     if (error instanceof AppError) throw error;
     throw new AppError("无法读取请求体", 400);
   } finally {
+    clearTimeout(expiry);
     reader?.releaseLock();
   }
   try {
     const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks, received));
     return JSON.parse(text, (key, value: unknown) => {
       assertValidText(key, typeof value === "string" ? value : null);
+      if (typeof value === "number" && !Number.isFinite(value)) throw new AppError("数字超出有效范围", 400);
       return value;
     }) as unknown;
   } catch (error) {

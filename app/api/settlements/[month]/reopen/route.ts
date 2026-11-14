@@ -7,6 +7,7 @@ import { serializeSettlement } from "@/lib/serializers";
 import { invalidateSubscriptionSyncCache, syncSubscriptions } from "@/lib/subscriptions";
 import { expectedVersionSchema } from "@/lib/validation";
 import { recordSettlementHistory } from "@/lib/settlement-history";
+import { nextLedgerVersion } from "@/lib/ledger-version";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,7 @@ export async function POST(request: Request, { params }: Context) {
       if (!existing) throw notFound("这个月还没有结算，无需重新打开");
       if (existing.revision !== expectedVersion) throw conflict("结算已被其他操作修改，请刷新后重试");
       if (existing.reopenedAt) throw conflict("这个月已经是打开状态");
-      const updated = await tx.monthlySettlement.update({ where: { month: monthStart(month) }, data: { reopenedAt: new Date(), revision: { increment: 1 } } });
+      const updated = await tx.monthlySettlement.update({ where: { month: monthStart(month) }, data: { reopenedAt: new Date(), revision: nextLedgerVersion(existing.revision, "结算") } });
       await recordSettlementHistory(tx, updated, "reopen");
       await syncSubscriptions(undefined, tx, { month });
       return updated;

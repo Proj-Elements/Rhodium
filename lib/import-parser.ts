@@ -100,7 +100,7 @@ export function optionalDateTime(input: unknown, label: string): Date | null {
     throw new Error(`${label}格式不正确`);
   }
   const date = new Date(input);
-  if (Number.isNaN(date.getTime())) throw new Error(`${label}格式不正确`);
+  if (Number.isNaN(date.getTime()) || date.getUTCFullYear() < 1 || date.getUTCFullYear() > 9999) throw new Error(`${label}格式不正确`);
   return date;
 }
 

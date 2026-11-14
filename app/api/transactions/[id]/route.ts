@@ -8,6 +8,7 @@ import { serializeTransaction, transactionInclude } from "@/lib/serializers";
 import { assertTransactionCategory, transactionData } from "@/lib/transactions";
 import { isMonthLocked } from "@/lib/summary";
 import { recordTransactionHistory } from "@/lib/transaction-history";
+import { nextLedgerVersion } from "@/lib/ledger-version";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,7 @@ export async function PATCH(request: Request, { params }: Context) {
           where: { id },
           data: {
             ...(action === "restore" ? { deletedAt: null } : { reimbursedAt: action === "unreimburse" ? null : new Date() }),
-            version: { increment: 1 },
+            version: nextLedgerVersion(existing.version, "账目"),
           },
           include: transactionInclude,
         });
@@ -57,7 +58,7 @@ export async function PATCH(request: Request, { params }: Context) {
       if (existing.reimbursedAt && (data.amountCents !== existing.amountCents || data.type !== existing.type || data.occurredOn.getTime() !== existing.occurredOn.getTime())) {
         throw conflict("这笔支出已报销，请先明确撤销报销，再修改金额、日期或收支类型");
       }
-      const transaction = await tx.transaction.update({ where: { id }, data: { ...data, version: { increment: 1 } }, include: transactionInclude });
+      const transaction = await tx.transaction.update({ where: { id }, data: { ...data, version: nextLedgerVersion(existing.version, "账目") }, include: transactionInclude });
       await recordTransactionHistory(tx, transaction, "edit", existing);
       return NextResponse.json({ transaction: serializeTransaction(transaction) });
     });
@@ -78,7 +79,7 @@ export async function DELETE(request: Request, { params }: Context) {
       if (!/^[1-9]\d*$/.test(versionValue) || !Number.isSafeInteger(Number(versionValue))) throw badRequest("删除账目需要有效的 expectedVersion");
       if (Number(versionValue) !== existing.version) throw conflict("账目已被其他操作修改，请刷新后重试");
       if (existing.deletedAt) return NextResponse.json({ id, deleted: true, version: existing.version, transaction: serializeTransaction(existing) });
-      const transaction = await tx.transaction.update({ where: { id }, data: { deletedAt: new Date(), version: { increment: 1 } }, include: transactionInclude });
+      const transaction = await tx.transaction.update({ where: { id }, data: { deletedAt: new Date(), version: nextLedgerVersion(existing.version, "账目") }, include: transactionInclude });
       await recordTransactionHistory(tx, transaction, "delete", existing);
       return NextResponse.json({ id, deleted: true, version: transaction.version, transaction: serializeTransaction(transaction) });
     });

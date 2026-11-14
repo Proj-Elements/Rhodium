@@ -20,7 +20,7 @@ export default defineConfig({
     globals: true,
     include: ["tests/integration/**/*.test.ts"],
     exclude: [...defaultExclude, ".claude/**", ".freebuff/**", ".copilot/**", ".delta/**", ".entire/**", ".thinkrail/**", ".codex/**"],
-    env: { DATABASE_URL: databaseUrl, TEST_DATABASE_URL: databaseUrl },
+    env: { DATABASE_URL: databaseUrl, TEST_DATABASE_URL: databaseUrl, RHODIUM_ACCESS_TOKEN: "rhodium-disposable-integration-test-token" },
     pool: "forks",
     maxWorkers: 1,
     fileParallelism: false,

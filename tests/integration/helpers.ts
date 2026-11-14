@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { resetSeedCache } from "@/lib/seed";
 import { resetSubscriptionSyncCache } from "@/lib/subscriptions";
 import { assertTestDatabaseIdentity, requireTestDatabase, type TestDatabaseIdentity } from "@/lib/test-database";
+import { resetRateLimiter } from "@/lib/rate-limit";
 
 const TABLES = ["CreationRequest", "TransactionHistory", "SettlementHistory", "Transaction", "Subscription", "MonthlyBudget", "BudgetPreset", "MonthlySettlement", "Category"]
   .map((table) => `"public"."${table}"`)
@@ -28,6 +29,12 @@ export async function resetDatabase() {
   });
   resetSeedCache();
   resetSubscriptionSyncCache();
+  resetRateLimiter();
+}
+
+/** Import routes enforce the HTTP boundary without middleware body cloning. */
+export function authenticatedHeaders(): Record<string, string> {
+  return { authorization: `Bearer ${process.env.RHODIUM_ACCESS_TOKEN}`, "content-type": "application/json" };
 }
 
 export function createCategory(name = "餐饮", type: CategoryType = CategoryType.EXPENSE) {

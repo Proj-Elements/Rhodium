@@ -42,13 +42,37 @@ const revision = z.number().int().positive().max(2_147_483_647);
 
 /** Reject excessive work before parsing elements, then reject ambiguous identities. */
 function rows<T extends z.ZodType>(schema: T, identity?: (row: z.infer<T>) => unknown, maximum = MAX_BACKUP_ROWS) {
-  return z.preprocess((value, context) => {
-    if (Array.isArray(value) && value.length > maximum) {
+  return z.unknown().transform((value, context): z.infer<T>[] => {
+    if (!Array.isArray(value)) {
+      context.addIssue({ code: "invalid_type", expected: "array" });
+      return z.NEVER;
+    }
+    if (value.length > maximum) {
       context.addIssue({ code: "too_big", origin: "array", maximum, inclusive: true });
       return z.NEVER;
     }
-    return value;
-  }, z.array(schema).max(maximum).refine((value) => !identity || new Set(value.map(identity)).size === value.length, "备份包含重复记录标识"));
+    const parsed: z.infer<T>[] = [];
+    let errors = 0;
+    for (let index = 0; index < value.length; index++) {
+      const row = schema.safeParse(value[index]);
+      if (row.success) parsed.push(row.data);
+      else {
+        for (const issue of row.error.issues.slice(0, 50 - errors)) {
+          context.addIssue({ ...issue, path: [index, ...issue.path] });
+          errors++;
+        }
+        // Avoid constructing hundreds of thousands of Zod issues for an
+        // invalid archive. No rows are returned and no writes can proceed.
+        if (errors >= 50) break;
+      }
+    }
+    if (errors) return z.NEVER;
+    if (identity && new Set(parsed.map(identity)).size !== parsed.length) {
+      context.addIssue({ code: "custom", message: "备份包含重复记录标识" });
+      return z.NEVER;
+    }
+    return parsed;
+  });
 }
 
 const category = z.object({
@@ -65,9 +89,8 @@ const subscription = z.object({
   billingPauses: pauses, billingHistory, note: z.string().nullable().optional(), ...stamps,
 }).refine((value) => !value.endMonth || value.endMonth.slice(0, 7) >= value.startMonth.slice(0, 7), "结束月份不能早于开始月份");
 const budget = z.object({ month: monthDate, amountCents: cents, ...stamps });
-const categorySnapshot = z.array(z.object({ categoryId: id, categoryName: z.string(), expenseCents: totalCents, outOfPocketCents: totalCents, incomeCents: totalCents })
-  .refine((value) => value.outOfPocketCents <= value.expenseCents, "分类自付金额不能超过账面支出"))
-  .refine((value) => new Set(value.map((row) => row.categoryId)).size === value.length, "结算分类快照不能包含重复分类");
+const categorySnapshot = rows(z.object({ categoryId: id, categoryName: z.string(), expenseCents: totalCents, outOfPocketCents: totalCents, incomeCents: totalCents })
+  .refine((value) => value.outOfPocketCents <= value.expenseCents, "分类自付金额不能超过账面支出"), (row) => row.categoryId);
 const settlement = z.object({
   month: monthDate, budgetAmountCents: totalCents, expenseAmountCents: totalCents, incomeAmountCents: totalCents,
   remainingAmountCents: signedCents.nullable().optional(), settledAt: timestamp.nullable().optional(), reopenedAt: timestamp.nullable().optional(),
@@ -105,20 +128,23 @@ export const backupSchema = z.object({
   settlementHistory: rows(settlementHistory, (value) => `${value.month}:${value.revision}`).refine((value) => new Set(value.map((row) => row.id)).size === value.length, "备份包含重复历史 ID").optional(),
   creationRequests: rows(creationRequest, (value) => value.key).optional(),
 }).superRefine((value, context) => {
+  let errors = 0;
+  const issue = (message: string) => { if (errors++ < 50) context.addIssue({ code: "custom", message }); };
   const systemKeys = (value.categories ?? []).flatMap((row) => row.systemKey ? [row.systemKey] : []);
-  if (new Set(systemKeys).size !== systemKeys.length) context.addIssue({ code: "custom", message: "备份包含重复系统分类身份" });
+  if (new Set(systemKeys).size !== systemKeys.length) issue("备份包含重复系统分类身份");
+  const now = new Date();
   for (const items of [value.categories, value.subscriptions, value.budgets, value.settlements, value.transactions]) {
-    for (const row of items ?? []) if (row.createdAt && row.updatedAt && new Date(row.updatedAt) < new Date(row.createdAt)) context.addIssue({ code: "custom", message: "更新时间不能早于创建时间" });
+    for (const row of items ?? []) if (row.createdAt && (row.updatedAt ? new Date(row.updatedAt) : now) < new Date(row.createdAt)) issue("更新时间不能早于创建时间；未来创建时间需要同时提供有效的更新时间");
   }
   const transactions = new Map((value.transactions ?? []).map((row) => [row.id, row.version ?? 1]));
   for (const row of value.transactionHistory ?? []) {
     const latest = transactions.get(row.transactionId);
-    if (latest !== undefined && row.version > latest) context.addIssue({ code: "custom", message: `账目 ${row.transactionId} 的历史版本超出现有账目版本` });
+    if (latest !== undefined && row.version > latest) issue(`账目 ${row.transactionId} 的历史版本超出现有账目版本`);
   }
   const settlements = new Map((value.settlements ?? []).map((row) => [row.month, row.revision ?? 1]));
   for (const row of value.settlementHistory ?? []) {
     const latest = settlements.get(row.month);
-    if (latest !== undefined && row.revision > latest) context.addIssue({ code: "custom", message: `${row.month.slice(0, 7)} 的历史结算版本超出现有结算版本` });
+    if (latest !== undefined && row.revision > latest) issue(`${row.month.slice(0, 7)} 的历史结算版本超出现有结算版本`);
   }
 });
 

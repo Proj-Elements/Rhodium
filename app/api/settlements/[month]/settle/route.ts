@@ -8,6 +8,7 @@ import { syncSubscriptions } from "@/lib/subscriptions";
 import { serializeSettlement } from "@/lib/serializers";
 import { recordSettlementHistory } from "@/lib/settlement-history";
 import type { SettlementCategorySnapshot } from "@/lib/types";
+import { nextLedgerVersion } from "@/lib/ledger-version";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,7 @@ export async function POST(_request: Request, { params }: Context) {
     const settlement = await withLedgerWrite(async (tx) => {
       const existing = await tx.monthlySettlement.findUnique({ where: { month: monthStart(month) } });
       if (existing && !existing.reopenedAt) return existing;
+      const revision = existing ? nextLedgerVersion(existing.revision, "结算") : 1;
       await syncSubscriptions(undefined, tx, { month });
       const summary = await getMonthSummary(month, tx);
       const values = [summary.budgetCents, summary.expenseCents, summary.incomeCents, summary.remainingCents];
@@ -71,7 +73,7 @@ export async function POST(_request: Request, { params }: Context) {
           settledAt: new Date(),
           reopenedAt: null,
           categorySnapshot,
-          revision: { increment: 1 },
+          revision,
         },
       });
       await recordSettlementHistory(tx, saved, "settle");

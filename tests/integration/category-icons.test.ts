@@ -5,10 +5,10 @@ import { GET as exportLedger } from "@/app/api/export/route";
 import { POST as importLedger } from "@/app/api/import/route";
 import { GET as listTransactions } from "@/app/api/transactions/route";
 import { GET as listSubscriptions } from "@/app/api/subscriptions/route";
-import { addTransaction, prisma, resetDatabase, routeContext } from "./helpers";
+import { authenticatedHeaders, addTransaction, prisma, resetDatabase, routeContext } from "./helpers";
 
 function jsonRequest(url: string, method: string, body: unknown) {
-  return new Request(`http://localhost${url}`, { method, headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  return new Request(`http://localhost${url}`, { method, headers: authenticatedHeaders(), body: JSON.stringify(body) });
 }
 
 beforeEach(resetDatabase);

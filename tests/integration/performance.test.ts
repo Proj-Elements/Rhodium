@@ -4,7 +4,7 @@ import { GET as getSettlements } from "@/app/api/settlements/route";
 import { setBudgetPreset, resolveBudget, resolveBudgets } from "@/lib/budget";
 import { addMonths, monthStart } from "@/lib/domain";
 import { getLockedMonths, getMonthSummaries, getMonthSummary, isMonthLocked } from "@/lib/summary";
-import { addTransaction, createCategory, prisma, resetDatabase } from "./helpers";
+import { authenticatedHeaders, addTransaction, createCategory, prisma, resetDatabase } from "./helpers";
 
 const END = "2024-06";
 const MONTHS = Array.from({ length: 6 }, (_, index) => addMonths(END, index - 5));
@@ -121,7 +121,7 @@ describe("POST /api/import", () => {
   function importRequest(rows: unknown[], backup?: Record<string, unknown>) {
     return new Request("http://localhost/api/import", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: authenticatedHeaders(),
       body: JSON.stringify(backup ? { backup: { ...backup, transactions: rows.length ? rows : backup.transactions ?? [] } } : { format: "json", rows }),
     });
   }
