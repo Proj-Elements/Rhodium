@@ -16,7 +16,7 @@ npm ci --ignore-scripts
 node node_modules/hpsetup/bin.js react --auto
 npx prisma generate
 cp .env.example .env
-# 编辑 .env，设置 POSTGRES_PASSWORD 和对应的本地 DATABASE_URL
+# 编辑 .env，设置 POSTGRES_PASSWORD、对应的本地 DATABASE_URL 和 RHODIUM_ACCESS_TOKEN
 # 本地 DATABASE_URL 中的密码需进行 URL 编码；Compose 会自动编码原始密码
 docker compose up -d db
 npx prisma migrate deploy
@@ -45,15 +45,16 @@ docker compose up -d --build
 | --- | --- | --- |
 | `APP_BIND` | `127.0.0.1` | 应用 3030 端口的绑定地址 |
 | `DB_BIND` | `127.0.0.1` | Postgres 5432 端口的绑定地址 |
-| `POSTGRES_PASSWORD` | `yueyu_password` | 数据库原始口令，供 Postgres 初始化和应用连接使用 |
+| `POSTGRES_PASSWORD` | 必填，无默认值 | 数据库原始口令，供 Postgres 初始化和应用连接使用 |
+| `RHODIUM_ACCESS_TOKEN` | 必填，无默认值 | 32–256 位共享访问令牌，浏览器 Basic / Agent Bearer |
 | `RHODIUM_ALLOWED_HOSTS` | 仅本机地址 | 允许访问应用的主机名或 `主机:端口`，多个值用逗号分隔 |
 | `RHODIUM_ALLOWED_ORIGINS` | 请求主机的同源地址 | 额外允许的精确来源地址，多个值用逗号分隔 |
 | `RHODIUM_TRUST_PROXY` | `false` | 是否信任代理转发的客户端地址；仅在可信代理覆盖这些头时启用 |
 
-确认所在网络可信后再对外暴露，并务必覆盖默认口令：
+先在 `.env` 设置强口令和访问令牌；远程访问须通过 HTTPS 代理，并配置允许的 Host：
 
 ```bash
-POSTGRES_PASSWORD='强口令' APP_BIND=0.0.0.0 RHODIUM_ALLOWED_HOSTS=ledger.example.com docker compose up -d --build
+RHODIUM_ALLOWED_HOSTS=ledger.example.com RHODIUM_ALLOWED_ORIGINS=https://ledger.example.com docker compose up -d --build
 ```
 
 `POSTGRES_PASSWORD` 只在**首次**创建数据卷时用于初始化数据库；之后修改需同时更新数据库中的角色口令。
